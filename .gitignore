@@ -1,0 +1,18 @@
+# Live business data: never commit (customers, invoices, user logins)
+data/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3
+db.json
+backups/
+erp-backup-*.json
+
+# Build / upload artefacts
+node_modules/
+*.zip
+*.log
+
+# Local settings and secrets
+.env
+.env.*

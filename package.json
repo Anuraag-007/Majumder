@@ -1,0 +1,16 @@
+{
+  "name": "majumdaar-hosiery-erp",
+  "version": "1.0.0",
+  "description": "Web-based ERP for Majumdaar Hosiery - purchase, knitting, dyeing, finishing, costing, inventory, sales and accounts",
+  "main": "server.js",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "demo": "node server/seed.js --demo",
+    "backup": "node server/backup.js",
+    "test": "node tests/storage.js && node tests/api.js && node tests/sessions.js && node tests/e2e.js"
+  },
+  "engines": {
+    "node": ">=22.13"
+  }
+}
