@@ -80,11 +80,11 @@ Go to **User Management → Users → New user** and create these 8 logins, all 
 
 ✅ **Check:** 4 lines load by themselves with the PO quantities.
 
-In the yarn line, type Lot / Batch **YB-1**. Save → **GRN-0001**.
+✅ **Check:** the **Lot no** column shows *new on save* on the yarn line and *no lot* on the dye, soda and poly bag lines. You never type a lot number. Save → **GRN-0001**.
 
-✅ **Check:** **Inventory → Stock Summary** shows Cotton Yarn 30s, lot YB-1, **1,000 kg** at Main Store, value **2,50,000.00**.
+✅ **Check:** **Inventory → Stock Summary** shows Cotton Yarn 30s, lot **L-0001** (given by the GRN), **1,000 kg** at Main Store, value **2,50,000.00**.
 
-**Inventory → Yarn Issue to Knitting → New**: item Y30, yarn lot YB-1, qty **2000**. Save.
+**Inventory → Yarn Issue to Knitting → New**: item Y30, yarn lot **L-0001**, qty **2000**. Save.
 
 ✅ **Check:** The ERP refuses: *"Not enough stock … short by 1000"*.
 
@@ -112,17 +112,21 @@ Amount **100000**, mode Bank Transfer. Save.
 
 ## Step 6 — Knitting Department (knitting1)
 
-✅ **Check (access):** The home page shows only Inventory (stock, transfer to color factory), Production (knitting, reports) and Wastage. There is no Dashboard with sales figures.
+✅ **Check (access):** The home page shows only knitting analytics (no ₹ figures) and the screens for Inventory (stock, transfer to color factory), Production (knitting, reports) and Wastage. There is no Dashboard with sales figures.
 
 **Production → Knitting → New**.
 
-✅ **Check:** Lot no is already **L-0001** and labour rate is **8**.
+✅ **Check:** Lot no shows *from the yarn lot* and labour rate is **8**.
 
-Yarn consumed: item Y30, yarn lot **YB-1 — 600 Kg**, qty **600**. Grey fabric produced: **GSJ**, output qty **585**, rolls **25**.
+Yarn consumed: item Y30, yarn lot **L-0001 — 600 Kg**, qty **600**.
 
-✅ **Check:** Wastage fills in as **15** kg (2.56%). Labour amount fills in as **4,680**. Save → **KNT-0001**.
+✅ **Check:** Lot no now shows **L-0001**: the grey fabric keeps the yarn's lot number.
 
-**Inventory → Transfer to Color Factory → New**: item GSJ, lot L-0001, qty **585**, rolls **25**. Save.
+Grey fabric produced: **GSJ**, output qty **585**, rolls **25**.
+
+✅ **Check:** Wastage fills in as **15** kg (2.50%). Labour amount fills in as **4,680**. **Grey fabric goes to** already shows **Color Factory (ready to dye)**. Save → **KNT-0001**.
+
+✅ **Check:** **Inventory → Stock Summary** shows lot **L-0001**, **585 kg / 25 rolls** of grey fabric at the **Color Factory**, with no transfer entry needed.
 
 ✅ **Check (access):** Typing `localhost:3000/#/list/dyeing` shows **No access**.
 
@@ -130,7 +134,7 @@ Yarn consumed: item Y30, yarn lot **YB-1 — 600 Kg**, qty **600**. Grey fabric 
 
 ## Step 7 — Dyeing / Color Department (dyeing1)
 
-**Production → Dyeing / Coloring → New**: grey fabric GSJ, grey lot **L-0001**.
+**Production → Dyeing / Coloring → New**: grey fabric GSJ, lot no **L-0001**.
 
 ✅ **Check:** Input qty fills in as **585**.
 
@@ -148,9 +152,11 @@ Color **Red**, colored fabric produced **CSJ**, output qty **570**.
 
 **Production → Finishing & Packing → New**: colored fabric CSJ, lot **L-0001**. Input qty fills in as **570**.
 
-Packing materials: **POLY, qty 24**. Finished goods produced **FSJ**, output **560**, rolls **24**, meters **2200**.
+Packing materials: **POLY, qty 24**. Finished goods produced **FSJ**.
 
-✅ **Check:** Wastage **10**, labour **3,360**. Save → **FIN-0001**.
+**Roll weights (kg):** type the weight of each of the 24 rolls with + between them. For this test, 23 rolls of 23.3 kg and one of 24.1 kg: `23.3 + 23.3 + …` (23 times) `+ 24.1`. Meters **2200**.
+
+✅ **Check:** Output qty fills in as **560** and rolls as **24** by themselves. Wastage **10**, labour **3,360**. Save → **FIN-0001**.
 
 ---
 
@@ -175,7 +181,9 @@ Packing materials: **POLY, qty 24**. Finished goods produced **FSJ**, output **5
 
 **Sales → Delivery Challans → New**: Kolkata Garments, against **SO-0001**.
 
-✅ **Check:** Qty 300 loads. Choose lot **L-0001 — 560 Kg**, rolls **13**. Save → **DC-0001**.
+✅ **Check:** Qty 300 loads. Choose lot **L-0001 — 560 Kg · 24 rolls**. The Rolls button fills in by itself as **13 · 23.3 + … + 20.4**: rolls 1–12 whole (279.6 kg) and 20.4 kg cut from roll 13. Save → **DC-0001**.
+
+To send particular rolls instead, click the Rolls button: tick whole rolls, or type fewer kg to cut one. The quantity follows what you choose.
 
 **Sales → Invoices → New**: Kolkata Garments, against **DC-0001**. Save, and confirm the credit warning.
 
@@ -184,7 +192,7 @@ Packing materials: **POLY, qty 24**. Finished goods produced **FSJ**, output **5
 
 **Invoices → New**: Odisha Traders, item FSJ, lot L-0001, qty **100**, change rate to **430**. Save → **INV-0002**.
 
-✅ **Check:** Tax shows as **IGST 2,150.00** (other state), with no CGST/SGST. Total **45,150.00**.
+✅ **Check:** Tax shows as **IGST 2,150.00** (other state), with no CGST/SGST. Total **45,150.00**. The rolls are **6**: the 2.9 kg left on roll 13, rolls 14–17 whole, and 3.9 kg cut from roll 18. **Print** shows Qty 100 and Rolls 6, with each roll's kg under the item.
 
 **Invoices → New**: Odisha Traders, FSJ, lot L-0001, qty **500**. Save.
 
@@ -195,6 +203,16 @@ Packing materials: **POLY, qty 24**. Finished goods produced **FSJ**, output **5
 ## Step 11 — Finance & Accounts (accounts1)
 
 **Customers → Payment Receipts → New**: Kolkata Garments, amount **50000**, mode UPI. Save.
+
+**Finance & Accounts → Labour Payments → New**: process **Knitting**.
+
+✅ **Check:** *Still payable for this process* shows **₹ 4,680.00** (585 kg × ₹8).
+
+Amount **4000**, paid to *Knitting floor workers*, mode Cash. Save.
+
+**Finance & Accounts → Labour Payable**:
+
+✅ **Check:** the tiles show Knitting **₹ 680.00**, Color (Dyeing) **₹ 8,775.00**, Finishing & Packing **₹ 3,360.00**, total **₹ 12,815.00**. The ledger lists the three production entries and the payment, with each process's running balance.
 
 ---
 
@@ -207,8 +225,9 @@ Sign in as manager1. You should see the full **Dashboard**.
 | Dashboard | Finished this month **560 kg**, avg cost **₹332.72/kg**; Open sales orders **0**; material in process: yarn in store **400 kg**, finished goods **160 kg** |
 | Costing → Lot Costing Sheet | Lot L-0001, 560 kg, total cost **1,86,325.00**; cost/kg **332.72**, cost/roll **7,763.54**, cost/mtr **84.69**; overhead **11,200.00**, packing **120.00** |
 | Wastage → Wastage Report | Knitting 15 kg, Dyeing 15 kg, Finishing 10 kg |
-| Production → Batch / Lot Tracking | L-0001: yarn 600 → FG 560, **yield 93.33%**, sold 400, FG stock 160 |
+| Production → Batch / Lot Tracking | L-0001: supplier Shree Mills, received **1,000 kg**; yarn 600 → FG 560, **yield 93.33%**, sold 400, FG stock 160 |
 | Inventory → Stock Summary | Main Store: yarn 400 kg, Reactive Red 8.3 kg, Soda Ash 41.5 kg, Poly Bag 26. Nothing left at the knitting or color factory |
+| Inventory → Finished Goods Rolls | L-0001, color **Red**, **160 kg in 7 rolls**: 19.4 + 23.3 + 23.3 + 23.3 + 23.3 + 23.3 + 24.1 |
 | Reports → Profitability | Sale value **1,69,000.00**, cost **1,33,089.29**, profit about **35,910** |
 | Finance → Receivables | Kolkata Garments **82,300.00**, Odisha Traders **45,150.00** |
 | Finance → Payables | Shree Mills **1,79,315.00** |
@@ -246,7 +265,7 @@ Part of this total shows in the *Wastage* column: the share of cost that went in
 |---|---|---|
 | purchase1 | Masters, purchase orders, bills, purchase & stock reports | Production, sales, receipts, users |
 | store1 | GRN, yarn issue, opening stock, stock reports | Production, invoices, bills, payments |
-| knitting1 | Knitting, transfer to color factory, production & stock reports | Dyeing, finishing, sales, GRN, yarn issue |
+| knitting1 | Knitting (grey fabric goes to the color factory by itself), transfer to color factory for held fabric, production & stock reports | Dyeing, finishing, sales, GRN, yarn issue |
 | dyeing1 | Dyeing, production & stock reports | Knitting, finishing, sales, purchase |
 | finishing1 | Finishing & packing, production & stock reports | Knitting, dyeing, sales, GRN |
 | sales1 | Customers, price list, orders, challans, invoices, sales reports | Production, bills, payments, overheads |
@@ -265,6 +284,6 @@ The same scenario runs automatically, with a browser signing in as each departme
 npm test
 ```
 
-It needs Node.js 22.13 or newer and Google Chrome or Microsoft Edge. It uses a temporary database, so your real data is never touched. It runs four checks in turn: the storage test (data survives restarts, old `db.json` import), the API rules, the two-tab sign-in test, and this department walkthrough. Each prints a pass/fail line for every check; the walkthrough ends with *ALL 102 CHECKS PASSED*.
+It needs Node.js 22.13 or newer and Google Chrome or Microsoft Edge. It uses a temporary database, so your real data is never touched. It runs four checks in turn: the storage test (data and sign-ins survive restarts, old `db.json` import), the API rules, the two-tab sign-in test, and this department walkthrough. Each prints a pass/fail line for every check; the walkthrough ends with *ALL 110 CHECKS PASSED*.
 
-It also checks, for every department login, that the menu, each screen and the server all agree on what that login may open or change. That's 116 checks per login.
+It also checks, for every department login, that the menu, each screen and the server all agree on what that login may open or change. That's 121 checks per login.

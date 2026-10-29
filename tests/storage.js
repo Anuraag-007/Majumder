@@ -64,7 +64,7 @@ const cols = run(A, `const { DatabaseSync } = require('node:sqlite'); const s = 
   s.close(); return { r, k, tables };`);
 ok(/^INV-\d{4}$/.test(cols.r.doc_no) && /^\d{4}-\d{2}-\d{2}$/.test(cols.r.doc_date), 'invoice table shows number and date columns (' + cols.r.doc_no + ', ' + cols.r.doc_date + ')');
 ok(cols.k.label === 'L-0001', 'knitting table shows the lot number');
-ok(cols.tables === 25, 'one table per area plus settings (' + cols.tables + ' tables)');
+ok(cols.tables === 27, 'one table per area plus settings and sign-ins (' + cols.tables + ' tables)');
 
 // 4. import from an old db.json
 const B = tmp();
@@ -102,18 +102,52 @@ const jr = run(J, `db.load(); seed.ensureBase(db.data); seed.loadDemo(db.data); 
 const jr2 = run(J, `db.load(); const { DatabaseSync } = require('node:sqlite'); const s = new DatabaseSync(db.FILE); const m = s.prepare('PRAGMA journal_mode').get().journal_mode; s.close(); return { fp: fingerprint(), m };`, { SQLITE_JOURNAL: 'DELETE' });
 ok(jr2.m === 'delete' && jr2.fp.hash === jr.hash && !fs.existsSync(path.join(J, 'erp.sqlite-wal')), 'SQLITE_JOURNAL=DELETE works (no -wal file, same data)');
 
-// 8. the running server backs up by itself once a day
-const S = tmp();
-run(S, `db.load(); seed.ensureBase(db.data); db.save(); return 1;`);
-const srv = require('child_process').spawn(process.execPath, [path.join(ROOT, 'server.js')], { env: Object.assign({}, process.env, { DATA_DIR: S, PORT: '3989', AUTO_BACKUP_FIRST_MS: '1500' }), stdio: 'ignore' });
-const until = Date.now() + 15000;
-(function wait() {
-  const dir = path.join(S, 'backups');
-  const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /^erp-.*\.sqlite$/.test(f)) : [];
-  if (files.length || Date.now() > until) {
-    srv.kill();
-    ok(files.length === 1, 'server made its own daily backup (' + (files[0] || 'none') + ')');
-    console.log(fails ? fails + ' FAILED' : 'ALL PASSED');
-    process.exitCode = fails ? 1 : 0;
-  } else setTimeout(wait, 300);
-})();
+// 8-10 run a real server.
+const startServer = (dir, port, extra) => require('child_process').spawn(process.execPath, [path.join(ROOT, 'server.js')], { env: Object.assign({}, process.env, { DATA_DIR: dir, PORT: String(port) }, extra || {}), stdio: 'ignore' });
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function up(port) {
+  for (let i = 0; i < 100; i++) { try { if ((await fetch('http://localhost:' + port + '/api/health')).ok) return; } catch (e) { /* still starting */ } await sleep(100); }
+  throw new Error('server on port ' + port + ' did not start');
+}
+const stop = srv => new Promise(r => { srv.once('exit', r); srv.kill(); });
+
+(async () => {
+  // 8. the running server backs up by itself once a day
+  const S = tmp();
+  run(S, `db.load(); seed.ensureBase(db.data); db.save(); return 1;`);
+  const srv = startServer(S, 3989, { AUTO_BACKUP_FIRST_MS: '1500' });
+  let files = [];
+  for (const until = Date.now() + 15000; !files.length && Date.now() < until; await sleep(300)) {
+    const dir = path.join(S, 'backups');
+    files = fs.existsSync(dir) ? fs.readdirSync(dir).filter(f => /^erp-.*\.sqlite$/.test(f)) : [];
+  }
+  await stop(srv);
+  ok(files.length === 1, 'server made its own daily backup (' + (files[0] || 'none') + ')');
+
+  // 9. sign-ins survive a restart (the host stops an idle app and starts it again on the next visit)
+  const W = tmp();
+  run(W, `db.load(); seed.ensureBase(db.data); db.save(); return 1;`);
+  const api = (u, token, method) => fetch('http://localhost:3988' + u, { method: method || 'GET', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token } });
+  let s1 = startServer(W, 3988); await up(3988);
+  const login = await (await fetch('http://localhost:3988/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: 'admin123' }) })).json();
+  const stored = run(W, `const { DatabaseSync } = require('node:sqlite'); const s = new DatabaseSync(db.FILE); const rows = s.prepare('SELECT token_hash FROM sessions').all(); s.close(); return rows.map(r => r.token_hash);`);
+  ok(stored.length === 1 && stored[0] !== login.token && /^[0-9a-f]{64}$/.test(stored[0]), 'sign-in kept on disk as a hash, never the token itself');
+  await stop(s1); s1 = startServer(W, 3988); await up(3988);
+  ok((await api('/api/me', login.token)).status === 200, 'still signed in after the server restarts');
+  run(W, `db.load(); db.data.units.push({ id: db.newId(), code: 'Dz', name: 'Dozen' }); db.save(); return 1;`);
+  const units = await (await api('/api/units', login.token)).json();
+  ok(units.some(u => u.code === 'Dz'), 'a change written by another process is picked up straight away');
+  await api('/api/logout', login.token, 'POST');
+  await stop(s1); s1 = startServer(W, 3988); await up(3988);
+  ok((await api('/api/me', login.token)).status === 401, 'signing out still ends the session after a restart');
+  await stop(s1);
+
+  // 10. ready-made roles from an older version get the new labour payments permission once
+  const M = tmp();
+  run(M, `db.load(); seed.ensureBase(db.data); for (const r of db.data.roles) delete r.perms.labourPayments; db.data.roles.find(r => r.id === 'operator').perms.labourPayments = 'none'; db.save(); return 1;`);
+  const mig = run(M, `db.load(); seed.ensureBase(db.data); db.save(); const p = id => db.data.roles.find(r => r.id === id).perms.labourPayments || '-'; return { accounts: p('accounts'), manager: p('manager'), operator: p('operator'), knitting: p('knitting') };`);
+  ok(mig.accounts === 'full' && mig.manager === 'full' && mig.operator === 'none' && mig.knitting === '-', 'existing roles: accounts and management get labour payments, a level the admin set is kept (' + JSON.stringify(mig) + ')');
+
+  console.log(fails ? fails + ' FAILED' : 'ALL PASSED');
+  process.exitCode = fails ? 1 : 0;
+})().catch(e => { console.log('ERR', e); process.exitCode = 1; });

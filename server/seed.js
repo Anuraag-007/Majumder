@@ -35,12 +35,19 @@ const PRESET_ROLES = [
   { id: 'sales', name: 'Sales Department', description: 'Orders, dispatch challans, invoices and customer prices',
     perms: { masters: 'edit', priceList: 'full', salesOrders: 'full', deliveries: 'full', invoices: 'full', receipts: 'view', rep_sales: 'view', rep_inventory: 'view', rep_accounts: 'view' } },
   { id: 'accounts', name: 'Finance & Accounts', description: 'Receipts, payments, bills, overheads, GST and costing',
-    perms: { dashboard: 'view', purchaseBills: 'full', payments: 'full', receipts: 'full', invoices: 'view', overheads: 'full', rep_accounts: 'view', rep_purchase: 'view', rep_sales: 'view', rep_costing: 'view', rep_inventory: 'view' } },
+    perms: { dashboard: 'view', purchaseBills: 'full', payments: 'full', receipts: 'full', invoices: 'view', overheads: 'full', labourPayments: 'full', rep_accounts: 'view', rep_purchase: 'view', rep_sales: 'view', rep_costing: 'view', rep_inventory: 'view' } },
 ];
+// Areas added after the first release: ready-made roles that have never had them set get the preset level.
+const NEW_AREAS = ['labourPayments'];
 
 function ensureBase(data) {
   const stamp = { createdAt: now(), createdBy: 'system' };
   if (!data.roles.length) for (const r of PRESET_ROLES) data.roles.push(Object.assign({}, r, stamp));
+  for (const r of data.roles) {
+    const preset = PRESET_ROLES.find(p => p.id === r.id);
+    if (!preset) continue;
+    for (const k of NEW_AREAS) if (preset.perms[k] && (r.perms || {})[k] === undefined) r.perms = Object.assign({}, r.perms, { [k]: preset.perms[k] });
+  }
   if (!data.users.length) {
     const { salt, hash } = hashPassword('admin123');
     data.users.push(Object.assign({ id: id(), username: 'admin', name: 'Administrator', role: 'admin', active: true, salt, hash }, stamp));
@@ -59,7 +66,7 @@ function ensureBase(data) {
 }
 
 function hasTransactions(data) {
-  return engine.STOCK_COLS.concat(['purchaseOrders', 'purchaseBills', 'payments', 'receipts', 'salesOrders', 'overheads']).some(c => data[c].length);
+  return engine.STOCK_COLS.concat(['purchaseOrders', 'purchaseBills', 'payments', 'receipts', 'salesOrders', 'overheads', 'labourPayments']).some(c => data[c].length);
 }
 
 function loadDemo(data) {
@@ -136,10 +143,11 @@ function loadDemo(data) {
   const itemGst = it => data.items.find(i => i.id === it).gst;
   const COLORS = [['Red', 'DRED', 0.03], ['Navy Blue', 'DBLU', 0.025], ['Maroon', 'DRED', 0.035], ['Royal Blue', 'DBLU', 0.02]];
   const CHEM = [['CSODA', 0.1], ['CSALT', 0.5], ['CSOFT', 0.02]];
-  let lotNo = 0;
-  const newLot = () => 'L-' + String(++lotNo).padStart(4, '0');
   const openInv = []; // [date, party, total]
   const openBills = [];
+  // Labour is paid at the start of each month for the month before, so the newest month is still owed.
+  const labourDue = { Knitting: 0, Dyeing: 0, Finishing: 0 };
+  const LABOUR_PAID_TO = { Knitting: ['Knitting floor workers', 'Cash'], Dyeing: ['Dyeing house workers', 'Bank Transfer'], Finishing: ['Finishing & packing workers', 'Cash'] };
   const BLOCKS = 12;
   for (let b = 0; b < BLOCKS; b++) {
     const s0 = 30 * (BLOCKS - b) - 4;          // block start, in days ago (356, 326 ... 26)
@@ -149,9 +157,10 @@ function loadDemo(data) {
     const poY = add('purchaseOrders', 'PO', { date: day(s0), party: P.SSM, deliveryDate: day(s0 - 3), status: 'Closed', lines: [{ item: I.Y30, qty: 1250, rate: yarnRate, gst: 5 }] });
     const poC = add('purchaseOrders', 'PO', { date: day(s0), party: P.CTX, status: 'Closed', lines: [{ item: I.DRED, qty: 25, rate: 480, gst: 18 }, { item: I.DBLU, qty: 20, rate: 520, gst: 18 }, { item: I.CSODA, qty: 130, rate: 38, gst: 18 }, { item: I.CSALT, qty: 620, rate: 12, gst: 18 }, { item: I.CSOFT, qty: 26, rate: 160, gst: 18 }] });
     const poP = add('purchaseOrders', 'PO', { date: day(s0), party: P.BPK, status: 'Closed', lines: [{ item: I.PPOLY, qty: 60, rate: 6, gst: 18 }, { item: I.PTUBE, qty: 60, rate: 14, gst: 18 }, { item: I.PTAPE, qty: 6, rate: 35, gst: 18 }] });
-    const batch = 'SSM-B' + (b + 1);
-    for (const [po, lot] of [[poY, batch], [poC, ''], [poP, '']]) {
-      const g = add('grn', 'GRN', { date: day(s0 - 1), party: po.party, poId: po.id, location: 'STORE', challanNo: 'CH-' + (500 + seq), lines: po.lines.map(l => ({ item: l.item, lot, qty: l.qty, rate: l.rate })) });
+    let batch = ''; // the yarn's lot number, given by the GRN; it stays with the fabric up to the sale
+    for (const po of [poY, poC, poP]) {
+      const g = add('grn', 'GRN', { date: day(s0 - 1), party: po.party, poId: po.id, location: 'STORE', challanNo: 'CH-' + (500 + seq), lines: po.lines.map(l => ({ item: l.item, lot: '', qty: l.qty, rate: l.rate })) });
+      if (po === poY) batch = g.lines[0].lot;
       const bill = add('purchaseBills', 'PB', { date: day(s0 - 1), billDate: day(s0 - 1), billNo: 'B/' + (900 + seq), party: g.party, grnId: g.id, freight: po === poY ? 2500 : 0, lines: g.lines.map(l => ({ item: l.item, qty: l.qty, rate: l.rate, gst: itemGst(l.item) })) });
       openBills.push(bill);
     }
@@ -160,18 +169,24 @@ function loadDemo(data) {
       add('payments', 'PAY', { date: day(s0 - 2), party: bill.party, amount: bill.total, mode: 'Bank Transfer', refNo: 'NEFT ' + (70000 + seq) });
     }
 
-    // --- knitting: two lots of 600 kg
+    for (const [stage, amt] of Object.entries(labourDue)) {
+      if (amt > 0) add('labourPayments', 'LP', { date: day(s0 - 2), stage, amount: Math.round(amt * 100) / 100, paidTo: LABOUR_PAID_TO[stage][0], mode: LABOUR_PAID_TO[stage][1], period: 'Previous month' });
+      labourDue[stage] = 0;
+    }
+
+    // --- knitting: 600 kg of the yarn lot into single jersey, 600 kg into rib (both keep the yarn's lot number)
     add('transfers', 'TRF', { date: day(s0 - 2), purpose: 'Yarn Issue', fromLoc: 'STORE', toLoc: 'KNIT', lines: [{ item: I.Y30, lot: batch, qty: 1200 }] });
     const lots = [];
     for (let k = 0; k < 2; k++) {
-      const lot = newLot();
+      const lot = batch;
       const waste = 10 + ((b + k) % 4) * 2;          // 10-16 kg
       const out = 600 - waste - 2;
       const rolls = Math.round(out / 24);
-      add('knitting', 'KNT', { date: day(s0 - 3 - k), lotNo: lot, machine: k ? M.K2 : M.K1, process: proc('Knitting').id, location: 'KNIT', shift: k ? 'Night' : 'Day', lines: [{ item: I.Y30, lot: batch, qty: 600 }], outItem: k ? I.GRIB : I.GSJ30, outQty: out, rolls, gsm: 160, dia: '30"', wastageQty: waste, scrapValue: waste * 40, labourRate: 8, labour: out * 8 });
+      add('knitting', 'KNT', { date: day(s0 - 3 - k), machine: k ? M.K2 : M.K1, process: proc('Knitting').id, location: 'KNIT', outLoc: 'DYE', shift: k ? 'Night' : 'Day', lines: [{ item: I.Y30, lot: batch, qty: 600 }], outItem: k ? I.GRIB : I.GSJ30, outQty: out, rolls, gsm: 160, dia: '30"', wastageQty: waste, scrapValue: waste * 40, labourRate: 8, labour: out * 8 });
+      labourDue.Knitting += out * 8;
       lots.push({ lot, grey: out, rolls, g: k ? I.GRIB : I.GSJ30, c: k ? I.CRIB : I.CSJ30, f: k ? I.FRIB : I.FSJ30 });
     }
-    add('transfers', 'TRF', { date: day(s0 - 5), purpose: 'Grey Transfer', fromLoc: 'KNIT', toLoc: 'DYE', vehicleNo: 'WB-11-A-2231', lines: lots.map(l => ({ item: l.g, lot: l.lot, qty: l.grey, rolls: l.rolls })) });
+    // grey fabric goes straight to the Color Factory from the knitting entry (outLoc 'DYE')
 
     // --- dyeing + finishing (the newest block's second lot stays waiting at the color factory)
     let fgKg = 0;
@@ -181,14 +196,19 @@ function loadDemo(data) {
       const [color, dye, per] = COLORS[(b * 2 + k) % COLORS.length];
       const dWaste = 12 + ((b + k) % 3) * 2;
       const dyed = l.grey - dWaste;
-      add('dyeing', 'DYE', { date: day(s0 - 7 - k), lotNo: l.lot, inItem: l.g, inQty: l.grey, machine: M.D1, process: proc('Dyeing').id, chemLoc: 'STORE', color, shade: color + ' ' + (per * 100).toFixed(1) + '%', outItem: l.c, outLot: l.lot, outQty: dyed, rolls: l.rolls, wastageQty: dWaste, scrapValue: 0, labourRate: 15, labour: l.grey * 15,
+      add('dyeing', 'DYE', { date: day(s0 - 7 - k), lotNo: l.lot, inItem: l.g, inQty: l.grey, machine: M.D1, process: proc('Dyeing').id, chemLoc: 'STORE', color, shade: color + ' ' + (per * 100).toFixed(1) + '%', outItem: l.c, outQty: dyed, rolls: l.rolls, wastageQty: dWaste, scrapValue: 0, labourRate: 15, labour: l.grey * 15,
         lines: [[dye, per]].concat(CHEM).map(([code, q]) => ({ item: I[code], lot: '', qty: Math.round(l.grey * q * 100) / 100 })) });
       const fWaste = 6 + ((b + k) % 3) * 2;
       const fg = dyed - fWaste;
       const rolls = Math.round(fg / 23.5);
-      add('finishing', 'FIN', { date: day(s0 - 10 - k), lotNo: l.lot, inItem: l.c, inQty: dyed, process: proc('Finishing').id, packLoc: 'STORE', finishType: 'Compacting', quality: 'A', outItem: l.f, outLot: l.lot, outQty: fg, rolls, meters: Math.round(fg * 3.9), wastageQty: fWaste, scrapValue: 0, labourRate: 6, labour: fg * 6,
+      // each roll weighed: around 23.5 kg, the last one makes up the lot's total
+      const weights = Array.from({ length: rolls - 1 }, (_, i) => Math.round((fg / rolls + [-1.3, 0.8, -0.4, 1.1, -0.7, 0.5][(i + b + k) % 6]) * 10) / 10);
+      weights.push(Math.round((fg - weights.reduce((t, w) => t + w, 0)) * 10) / 10);
+      add('finishing', 'FIN', { date: day(s0 - 10 - k), lotNo: l.lot, inItem: l.c, inQty: dyed, process: proc('Finishing').id, packLoc: 'STORE', finishType: 'Compacting', quality: 'A', outItem: l.f, outQty: fg, rolls, rollWeights: weights.join(' + '), meters: Math.round(fg * 3.9), wastageQty: fWaste, scrapValue: 0, labourRate: 6, labour: fg * 6,
         lines: [{ item: I.PPOLY, lot: '', qty: rolls }, { item: I.PTUBE, lot: '', qty: rolls }, { item: I.PTAPE, lot: '', qty: 2 }] });
       fgKg += fg;
+      labourDue.Dyeing += l.grey * 15;
+      labourDue.Finishing += fg * 6;
       fgLotsHere.push({ lot: l.lot, kg: fg, item: l.f });
     });
 
@@ -234,6 +254,20 @@ function loadDemo(data) {
   // an open order waiting for dispatch
   add('salesOrders', 'SO', { date: day(2), party: P.SUN, deliveryDate: day(-10), status: 'Open', customerPo: 'SUN/88', lines: [{ item: I.FSJ30, qty: 250, rate: 428, gst: 5 }] });
   add('purchaseOrders', 'PO', { date: day(1), party: P.SSM, deliveryDate: day(-6), status: 'Open', lines: [{ item: I.Y30, qty: 1500, rate: 256, gst: 5 }] });
+
+  // Record on each challan / direct invoice line which rolls it took (taken in roll order), and copy
+  // them onto invoices made from a challan, as the screens do.
+  const R = engine.compute(data);
+  for (const d of data.deliveries.concat(data.invoices.filter(i => !i.challanId))) {
+    d.lines.forEach((l, i) => {
+      const p = R.salePieces[d.id + '|' + i];
+      if (p && Math.abs(p.reduce((t, x) => t + x.kg, 0) - l.qty) < 0.001) { l.rollPick = p; l.rolls = p.length; }
+    });
+  }
+  for (const inv of data.invoices.filter(i => i.challanId)) {
+    const dc = data.deliveries.find(x => x.id === inv.challanId);
+    inv.lines.forEach((l, i) => { const c = dc && dc.lines[i]; if (c && c.rollPick) { l.rollPick = c.rollPick; l.rolls = c.rolls; } });
+  }
 }
 
 module.exports = { ensureBase, loadDemo, hasTransactions, BASE_LOCATIONS };

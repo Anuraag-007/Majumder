@@ -12,6 +12,7 @@ const byId = (col, id) => Cache.byId(col, id);
 const itemOf = id => byId('items', id);
 const unitOf = id => { const i = itemOf(id); const u = i && byId('units', i.unit); return u ? u.code : ''; };
 const sumQty = rows => (rows || []).reduce((s, r) => s + S.num(r.qty), 0);
+const lotTracked = id => S.LOT_CATEGORIES.includes((itemOf(id) || {}).category);
 const partyName = id => { const p = byId('parties', id); return p ? p.name : ''; };
 
 const REF_LABEL = {
@@ -54,9 +55,20 @@ const C = {
   gst: { k: 'gst', label: 'GST %', type: 'number', narrow: true },
   rolls: { k: 'rolls', label: 'Rolls', type: 'number', narrow: true, fmt: 'int' },
   amount: { k: '_amount', label: 'Amount', type: 'calc', fmt: 'money', value: r => S.num(r.qty) * S.num(r.rate) },
-  lotText: { k: 'lot', label: 'Lot / Batch', type: 'text', placeholder: 'optional' },
+  // Lot numbers are given by the ERP when yarn or fabric is received, and never typed.
+  lotAuto: { k: 'lot', label: 'Lot no', type: 'calc', value: r => r.lot || (!r.item ? '' : lotTracked(r.item) ? 'new on save' : 'no lot') },
+  // Opening stock / adjustment: a + line can start a new lot or add to one; a - line takes from a lot.
+  lotAdjust: { k: 'lot', label: 'Lot no', type: 'lot', loc: d => d.location, itemKey: 'item', signed: true, blank: r => lotTracked(r.item) ? 'new lot (auto)' : '— no lot —' },
   lotFrom: (locFn, label) => ({ k: 'lot', label: label || 'Lot / Batch', type: 'lot', loc: locFn, itemKey: 'item' }),
+  // Rolls going out of a lot: for lots weighed roll by roll, a button to choose which rolls.
+  rollsOut: (locFn, locked) => ({ k: 'rolls', label: 'Rolls', type: 'rolls', fmt: 'int', loc: locFn, locked }),
+  rollWeights: { k: 'rollWeights', label: 'Roll weights (kg)', type: 'text', placeholder: 'e.g. 20.2 + 50.3', wide: true },
 };
+// "20.2 + 50.3 + 39.5" typed in a roll weights box fills the kg and the number of rolls.
+function applyRollWeights(obj, qtyKey) {
+  const w = S.parseRolls(obj.rollWeights);
+  if (w && w.length) { obj[qtyKey] = S.r3(w.reduce((t, x) => t + x, 0)); obj.rolls = w.length; }
+}
 
 // When an item is picked on a priced line, pull GST and a sensible rate.
 const fillPurchaseLine = (row) => { const i = itemOf(row.item); if (i) { row.gst = S.num(i.gst); if (!S.num(row.rate)) row.rate = S.num(i.rate); } };
@@ -80,6 +92,7 @@ function pendingFrom(srcDoc, childCol, linkKey, selfId) {
 // Keeps wastage (input - output) and labour (rate x qty) filled in until the user overrides them.
 function productionRecalc(stage) {
   return doc => {
+    if (stage === 'Finishing') applyRollWeights(doc, 'outQty');
     const inQ = stage === 'Knitting' ? sumQty(doc.lines) : S.num(doc.inQty);
     const outQ = S.num(doc.outQty);
     if (!doc._wastageQtyTouched && outQ > 0) doc.wastageQty = S.r3(Math.max(0, inQ - outQ));
@@ -108,7 +121,8 @@ const bomField = stage => ({
 });
 const outputFields = (stage, outCats, extra) => [
   { k: 'outItem', label: stage === 'Knitting' ? 'Grey fabric produced' : stage === 'Dyeing' ? 'Colored fabric produced' : 'Finished goods produced', type: 'ref', ref: 'items', req: true, w: 2, filter: i => outCats.includes(i.category) },
-  stage === 'Knitting' ? null : { k: 'outLot', label: 'Output lot', type: 'text', help: 'Normally same as input lot' },
+  stage === 'Finishing' ? { k: 'rollWeights', label: 'Roll weights (kg)', type: 'text', w: 4, placeholder: 'e.g. 20.2 + 50.3 + 39.5',
+    help: 'Weigh each finished roll and type its kg with + between them. Output kg and rolls then fill in by themselves, and each roll is tracked through to the sale.' } : null,
   { k: 'outQty', label: 'Output qty (kg)', type: 'number', req: true, fmt: 'qty' },
   { k: 'rolls', label: 'Rolls', type: 'number', fmt: 'int' },
 ].concat(extra || [], [
@@ -233,6 +247,7 @@ const SCHEMAS = {
   },
   grn: {
     title: 'Goods Receipt (GRN)', singular: 'GRN', col: 'grn', printTitle: 'GOODS RECEIPT NOTE',
+    note: 'Each yarn or fabric line gets its lot number (L-0001, L-0002 ...) when you save. That one number stays with the material through knitting, dyeing and finishing to the sale. Dyes, chemicals and packing have no lot.',
     layout: [
       { fields: [
         F.no, F.date, F.party('Supplier'),
@@ -243,7 +258,7 @@ const SCHEMAS = {
         { k: 'challanNo', label: 'Supplier challan no', type: 'text' },
         { k: 'vehicleNo', label: 'Vehicle no', type: 'text' },
       ] },
-      { grid: { k: 'lines', title: 'Items received', cols: [C.item(S.CATEGORIES, { onChange: fillPurchaseLine }), C.lotText, C.qty('Qty received'), C.unit, C.rolls, C.rate, C.amount] } },
+      { grid: { k: 'lines', title: 'Items received', cols: [C.item(S.CATEGORIES, { onChange: fillPurchaseLine }), C.lotAuto, C.qty('Qty received'), C.unit, C.rolls, C.rate, C.amount] } },
       { fields: [F.remarks] },
     ],
     listCols: ['no', 'date', 'party', { k: 'poId', label: 'PO' }, 'challanNo', { k: 'total', label: 'Value', fmt: 'money' }],
@@ -275,6 +290,25 @@ const SCHEMAS = {
     ] }],
     listCols: ['no', 'date', 'party', 'mode', 'refNo', { k: 'amount', label: 'Amount', fmt: 'money' }],
   },
+  labourPayments: {
+    title: 'Labour Payments', singular: 'Labour Payment', col: 'labourPayments', printTitle: 'LABOUR PAYMENT VOUCHER',
+    note: 'Wages paid for knitting, color (dyeing) or finishing & packing. Labour earned comes from the production entries; the Labour Payable page shows what is still owed.',
+    info: async doc => {
+      if (!doc.stage) return '';
+      const r = await API.report('labourBalance', { stage: doc.stage });
+      return '₹ ' + U.money(r.payable) + (doc.id ? ' (after saved payments)' : '');
+    },
+    layout: [{ fields: [
+      F.no, F.date,
+      { k: 'stage', label: 'Process', type: 'select', req: true, w: 2, list: true, options: S.STAGES.map(s => [s, S.STAGE_LABELS[s]]), onChange: (d, ctx) => ctx.loadInfo() },
+      { k: '_info', label: 'Still payable for this process', type: 'calc', value: d => d._infoText || '' },
+      { k: 'amount', label: 'Amount (₹)', type: 'number', req: true, fmt: 'money', list: true },
+      { k: 'paidTo', label: 'Paid to (worker / contractor)', type: 'text', w: 2, list: true },
+      { k: 'period', label: 'For (week / month)', type: 'text' },
+      F.mode, { k: 'refNo', label: 'Cheque / UTR no', type: 'text' }, F.remarks,
+    ] }],
+    listCols: ['no', 'date', 'stage', 'paidTo', 'period', 'mode', { k: 'amount', label: 'Amount', fmt: 'money' }],
+  },
 
   /* ===== Inventory movements ===== */
   yarnIssue: {
@@ -291,7 +325,7 @@ const SCHEMAS = {
   greyTransfer: {
     title: 'Transfer to Color Factory', singular: 'Grey Transfer', col: 'transfers', printTitle: 'GREY FABRIC TRANSFER NOTE',
     fixed: { purpose: 'Grey Transfer', fromLoc: 'KNIT', toLoc: 'DYE' }, where: d => d.purpose === 'Grey Transfer',
-    note: 'Moves grey fabric lots from the Knitting Factory to the Color Factory.',
+    note: 'Only needed for grey fabric kept at the Knitting Factory (older entries, or when "Grey fabric goes to" was set to Knitting Factory). New knitting entries send the fabric to the Color Factory by themselves.',
     layout: [
       { fields: [F.no, F.date, { k: 'vehicleNo', label: 'Vehicle no', type: 'text' }, { k: 'driver', label: 'Driver', type: 'text' }] },
       { grid: { k: 'lines', title: 'Grey fabric lots', cols: [C.item(['Grey Fabric']), C.lotFrom(() => 'KNIT', 'Lot'), C.qty('Qty (kg)'), C.rolls, C.unit] } },
@@ -315,10 +349,11 @@ const SCHEMAS = {
   },
   stockAdjust: {
     title: 'Opening Stock / Adjustment', singular: 'Stock Adjustment', col: 'stockAdjust',
-    note: 'Enter opening stock with positive qty and rate. Use negative qty to write off damaged or short stock.',
+    note: 'Enter opening stock with positive qty and rate: leave the lot on "new lot (auto)" and yarn or fabric gets its own lot number when you save. Use negative qty, and choose the lot, to write off damaged or short stock.',
     layout: [
       { fields: [F.no, F.date, { k: 'location', label: 'Location', type: 'ref', ref: 'locations', req: true, def: 'STORE', list: true }, { k: 'reason', label: 'Reason', type: 'select', options: ['Opening Stock', 'Physical Verification', 'Damage / Write-off', 'Other'], def: 'Opening Stock', list: true }] },
-      { grid: { k: 'lines', title: 'Items (+ adds, - removes)', cols: [C.item(S.CATEGORIES, { onChange: r => { const i = itemOf(r.item); if (i && !S.num(r.rate)) r.rate = S.num(i.rate); } }), C.lotText, C.qty('Qty (+/-)'), C.unit, C.rolls, { k: 'rate', label: 'Rate (for +)', type: 'number', fmt: 'money' }, C.amount] } },
+      { grid: { k: 'lines', title: 'Items (+ adds, - removes)', cols: [C.item(S.CATEGORIES, { onChange: r => { const i = itemOf(r.item); if (i && !S.num(r.rate)) r.rate = S.num(i.rate); } }), C.lotAdjust, C.rollWeights, C.qty('Qty (+/-)'), C.unit, C.rolls, { k: 'rate', label: 'Rate (for +)', type: 'number', fmt: 'money' }, C.amount],
+        onEdit: (d, r) => { if (r) applyRollWeights(r, 'qty'); } } },
       { fields: [F.remarks] },
     ],
   },
@@ -327,23 +362,28 @@ const SCHEMAS = {
   knitting: {
     title: 'Knitting Production', singular: 'Knitting Entry', col: 'knitting', printTitle: 'KNITTING PRODUCTION SLIP',
     fixed: { location: 'KNIT' },
-    note: 'Consumes yarn at the Knitting Factory and produces a new grey fabric lot.',
-    onNew: async doc => { doc.lotNo = (await API.report('nextLot')).lot; const p = Cache.list('processes').find(x => x.stage === 'Knitting'); if (p) { doc.process = p.id; doc.labourRate = S.num(p.labourRate); } },
+    note: 'Consumes yarn at the Knitting Factory and produces grey fabric with the same lot number as the yarn. The grey fabric goes straight to the Color Factory for dyeing.',
+    onNew: async doc => { const p = Cache.list('processes').find(x => x.stage === 'Knitting'); if (p) { doc.process = p.id; doc.labourRate = S.num(p.labourRate); } },
     recalc: productionRecalc('Knitting'),
     layout: [
       { fields: [
         F.no, F.date,
-        { k: 'lotNo', label: 'Lot no (new)', type: 'text', req: true, list: true },
+        { k: 'lotNo', label: 'Lot no', type: 'calc', list: true, value: d => (d.id && d.lotNo) || S.mainLot(d.lines) || 'from the yarn lot',
+          help: 'Same as the main yarn lot (the yarn line with the most kg)' },
         { k: 'machine', label: 'Machine', type: 'ref', ref: 'machines', filter: m => m.type === 'Knitting', list: true },
         processField('Knitting'),
         { k: 'shift', label: 'Shift', type: 'select', options: ['Day', 'Night', 'General'], def: 'Day' },
         { k: 'operator', label: 'Operator', type: 'text' },
       ] },
       { grid: { k: 'lines', title: 'Yarn consumed (from Knitting Factory stock)', cols: [C.item(['Yarn']), C.lotFrom(() => 'KNIT', 'Yarn lot'), C.qty('Qty (kg)'), C.unit], totals: ['qty'] } },
-      { title: 'Grey fabric output, wastage & labour', fields: outputFields('Knitting', ['Grey Fabric'], [{ k: 'gsm', label: 'GSM', type: 'number' }, { k: 'dia', label: 'Dia', type: 'text' }]) },
+      { title: 'Grey fabric output, wastage & labour', fields: outputFields('Knitting', ['Grey Fabric'], [{ k: 'gsm', label: 'GSM', type: 'number' }, { k: 'dia', label: 'Dia', type: 'text' },
+        { k: 'outLoc', label: 'Grey fabric goes to', type: 'select', w: 2, def: 'DYE', legacy: 'KNIT',
+          options: [['DYE', 'Color Factory (ready to dye)'], ['KNIT', 'Knitting Factory (send later by transfer)']],
+          help: 'Normally straight to the Color Factory; no separate transfer needed' }]) },
       { fields: [F.remarks] },
     ],
-    listCols: ['no', 'date', 'lotNo', 'machine', { k: '_in', label: 'Yarn kg', fmt: 'qty', value: d => sumQty(d.lines) }, { k: 'outQty', label: 'Grey kg', fmt: 'qty' }, { k: 'rolls', label: 'Rolls', fmt: 'int' }, { k: 'wastageQty', label: 'Wastage kg', fmt: 'qty' }],
+    listCols: ['no', 'date', 'lotNo', 'machine', { k: '_in', label: 'Yarn kg', fmt: 'qty', value: d => sumQty(d.lines) }, { k: 'outQty', label: 'Grey kg', fmt: 'qty' }, { k: 'rolls', label: 'Rolls', fmt: 'int' }, { k: 'wastageQty', label: 'Wastage kg', fmt: 'qty' },
+      { k: '_to', label: 'Grey sent to', value: d => d.outLoc === 'DYE' ? 'Color Factory' : 'Knitting Factory' }],
   },
   dyeing: {
     title: 'Dyeing / Coloring', singular: 'Dyeing Entry', col: 'dyeing', printTitle: 'DYEING BATCH CARD',
@@ -355,8 +395,8 @@ const SCHEMAS = {
       { fields: [
         F.no, F.date,
         { k: 'inItem', label: 'Grey fabric', type: 'ref', ref: 'items', req: true, w: 2, filter: i => i.category === 'Grey Fabric' },
-        { k: 'lotNo', label: 'Grey lot', type: 'lot', loc: () => 'DYE', itemKey: 'inItem', req: true, list: true,
-          onChange: (d, ctx) => { const a = ctx.available('DYE', d.inItem, d.lotNo); if (a > 0) d.inQty = a; d.outLot = d.lotNo; } },
+        { k: 'lotNo', label: 'Lot no', type: 'lot', loc: () => 'DYE', itemKey: 'inItem', req: true, list: true,
+          onChange: (d, ctx) => { const a = ctx.available('DYE', d.inItem, d.lotNo); if (a > 0) d.inQty = a; } },
         { k: 'inQty', label: 'Input qty (kg)', type: 'number', req: true, fmt: 'qty' },
         { k: 'machine', label: 'Machine', type: 'ref', ref: 'machines', filter: m => m.type === 'Dyeing' },
         processField('Dyeing'),
@@ -380,8 +420,8 @@ const SCHEMAS = {
       { fields: [
         F.no, F.date,
         { k: 'inItem', label: 'Colored fabric', type: 'ref', ref: 'items', req: true, w: 2, filter: i => i.category === 'Colored Fabric' },
-        { k: 'lotNo', label: 'Lot', type: 'lot', loc: () => 'DYE', itemKey: 'inItem', req: true, list: true,
-          onChange: (d, ctx) => { const a = ctx.available('DYE', d.inItem, d.lotNo); if (a > 0) d.inQty = a; d.outLot = d.lotNo; } },
+        { k: 'lotNo', label: 'Lot no', type: 'lot', loc: () => 'DYE', itemKey: 'inItem', req: true, list: true,
+          onChange: (d, ctx) => { const a = ctx.available('DYE', d.inItem, d.lotNo); if (a > 0) d.inQty = a; } },
         { k: 'inQty', label: 'Input qty (kg)', type: 'number', req: true, fmt: 'qty' },
         processField('Finishing'),
         { k: 'finishType', label: 'Finish', type: 'select', options: ['Compacting', 'Stentering', 'Open width', 'Tubular', 'Raising', 'Other'] },
@@ -429,10 +469,11 @@ const SCHEMAS = {
         { k: 'vehicleNo', label: 'Vehicle no', type: 'text', list: true },
         { k: 'transporter', label: 'Transporter', type: 'text' },
       ] },
-      { grid: { k: 'lines', title: 'Goods dispatched', cols: [C.item(['Finished Goods'], { onChange: fillSaleLine }), C.lotFrom(() => 'FG', 'Lot'), C.qty('Qty (kg)'), C.rolls, C.unit, C.rate, C.amount], totals: ['qty', 'rolls'] } },
+      { grid: { k: 'lines', title: 'Goods dispatched', cols: [C.item(['Finished Goods'], { onChange: fillSaleLine }), C.lotFrom(() => 'FG', 'Lot'), C.qty('Qty (kg)'), C.rollsOut(() => 'FG'), C.unit, C.rate, C.amount], totals: ['qty', 'rolls'],
+        onEdit: (d, r, ctx) => { if (r) ctx.autoRolls(r, 'FG'); } } },
       { fields: [F.remarks] },
     ],
-    listCols: ['no', 'date', 'party', { k: '_qty', label: 'Kg', fmt: 'qty', value: d => sumQty(d.lines) }, 'vehicleNo', { k: '_inv', label: 'Invoiced', value: d => { const i = Cache.list('invoices').find(x => x.challanId === d.id); return i ? i.no : '—'; } }],
+    listCols: ['no', 'date', 'party', { k: '_qty', label: 'Kg', fmt: 'qty', value: d => sumQty(d.lines) }, { k: '_rolls', label: 'Rolls', fmt: 'int', value: d => (d.lines || []).reduce((t, l) => t + S.num(l.rolls), 0) }, 'vehicleNo', { k: '_inv', label: 'Invoiced', value: d => { const i = Cache.list('invoices').find(x => x.challanId === d.id); return i ? i.no : '—'; } }],
     needs: ['invoices'],
   },
   invoices: {
@@ -445,12 +486,13 @@ const SCHEMAS = {
         { k: '_bal', label: 'Outstanding', type: 'calc', value: d => d._balText || '' },
         { k: 'challanId', label: 'Against challan', type: 'ref', ref: 'deliveries',
           filter: (r, d) => r.party === d.party && !Cache.list('invoices').some(i => i.challanId === r.id && i.id !== d.id),
-          onChange: d => { const c = byId('deliveries', d.challanId); if (c) d.lines = c.lines.map(l => ({ item: l.item, lot: l.lot, qty: l.qty, rolls: l.rolls, rate: S.num(l.rate) || priceFor(d.party, l.item), gst: S.num((itemOf(l.item) || {}).gst) })); } },
+          onChange: d => { const c = byId('deliveries', d.challanId); if (c) d.lines = c.lines.map(l => ({ item: l.item, lot: l.lot, qty: l.qty, rolls: l.rolls, rollPick: l.rollPick, rate: S.num(l.rate) || priceFor(d.party, l.item), gst: S.num((itemOf(l.item) || {}).gst) })); } },
         { k: 'placeOfSupply', label: 'Place of supply', type: 'select', options: S.STATE_NAMES, help: 'Blank = customer\'s state. Decides CGST+SGST or IGST' },
         { k: 'vehicleNo', label: 'Vehicle no', type: 'text' },
         { k: 'dueDate', label: 'Due date', type: 'date' },
       ] },
-      { grid: { k: 'lines', title: 'Items', cols: [C.item(['Finished Goods'], { onChange: fillSaleLine }), C.lotFrom(() => 'FG', 'Lot'), C.qty('Qty (kg)'), C.rolls, C.unit, C.rate, C.gst, C.amount] } },
+      { grid: { k: 'lines', title: 'Items', cols: [C.item(['Finished Goods'], { onChange: fillSaleLine }), C.lotFrom(() => 'FG', 'Lot'), C.qty('Qty (kg)'), C.rollsOut(() => 'FG', d => !!d.challanId), C.unit, C.rate, C.gst, C.amount], totals: ['qty', 'rolls'],
+        onEdit: (d, r, ctx) => { if (r && !d.challanId) ctx.autoRolls(r, 'FG'); } } },
       { fields: [{ k: 'freight', label: 'Freight (₹)', type: 'number', fmt: 'money' }, { k: 'otherCharges', label: 'Other charges (₹)', type: 'number', fmt: 'money' }, { k: 'discount', label: 'Discount (₹)', type: 'number', fmt: 'money' }, F.remarks] },
       { totals: true },
     ],
@@ -525,13 +567,13 @@ const NAV = [
   { t: 'Dashboard', icon: 'home', href: '#/dashboard' },
   { t: 'Masters', icon: 'db', kids: [['Items', 'items'], ['Parties', 'parties'], ['Units', 'units'], ['Locations', 'locations'], ['Machines', 'machines'], ['Processes', 'processes'], ['BOM / Recipes', 'boms']] },
   { t: 'Purchase', icon: 'cart', kids: [['Purchase Orders', 'purchaseOrders'], ['Goods Receipt (GRN)', 'grn'], ['Purchase Bills', 'purchaseBills'], ['Supplier Payments', 'payments'], ['Pending POs', '#/report/poPending']] },
-  { t: 'Inventory', icon: 'box', kids: [['Stock Summary', '#/report/stock'], ['Stock Ledger', '#/report/stockLedger'], ['Yarn Issue to Knitting', 'yarnIssue'], ['Transfer to Color Factory', 'greyTransfer'], ['All Transfers', 'transfers'], ['Opening / Adjustment', 'stockAdjust']] },
+  { t: 'Inventory', icon: 'box', kids: [['Stock Summary', '#/report/stock'], ['Finished Goods Rolls', '#/report/stock?location=FG'], ['Stock Ledger', '#/report/stockLedger'], ['Yarn Issue to Knitting', 'yarnIssue'], ['Transfer to Color Factory', 'greyTransfer'], ['All Transfers', 'transfers'], ['Opening / Adjustment', 'stockAdjust']] },
   { t: 'Production', icon: 'factory', kids: [['Knitting', 'knitting'], ['Dyeing / Coloring', 'dyeing'], ['Finishing & Packing', 'finishing'], ['Production Report', '#/report/production'], ['Batch / Lot Tracking', '#/report/lots']] },
   { t: 'Wastage', icon: 'trash', kids: [['Wastage Report', '#/report/wastage']] },
   { t: 'Costing', icon: 'calc', kids: [['Lot Costing Sheet', '#/report/costing'], ['Item-wise Costing', '#/report/itemCosting'], ['Overhead Entries', 'overheads'], ['Overhead Absorption', '#/report/overheads']] },
   { t: 'Sales', icon: 'tag', kids: [['Sales Orders', 'salesOrders'], ['Delivery Challans', 'deliveries'], ['Invoices', 'invoices'], ['Party Price List', 'priceList'], ['Pending Orders', '#/report/soPending']] },
   { t: 'Customers', icon: 'users', kids: [['Customer Master', 'customers'], ['Payment Receipts', 'receipts'], ['Receivables & Credit', '#/report/outstanding?type=receivable']] },
-  { t: 'Finance & Accounts', icon: 'rupee', kids: [['Customer Receipts', 'receipts'], ['Supplier Payments', 'payments'], ['Party Ledger', '#/report/partyLedger'], ['Receivables', '#/report/outstanding?type=receivable'], ['Payables', '#/report/outstanding?type=payable'], ['GST Summary', '#/report/gst']] },
+  { t: 'Finance & Accounts', icon: 'rupee', kids: [['Customer Receipts', 'receipts'], ['Supplier Payments', 'payments'], ['Labour Payments', 'labourPayments'], ['Party Ledger', '#/report/partyLedger'], ['Receivables', '#/report/outstanding?type=receivable'], ['Payables', '#/report/outstanding?type=payable'], ['Labour Payable', '#/report/labourPayable'], ['GST Summary', '#/report/gst']] },
   { t: 'Reports', icon: 'chart', href: '#/reports' },
   { t: 'User Management', icon: 'shield', kids: [['Users', 'users'], ['Roles & Permissions', 'roles'], ['Settings & Password', '#/settings']] },
 ];
@@ -554,5 +596,6 @@ const REPORTS = {
   soPending: { title: 'Pending Sales Orders', group: 'Sales', filters: ['customer', 'all'] },
   outstanding: { title: 'Outstanding Report', group: 'Accounts', filters: ['type', 'asOn'] },
   partyLedger: { title: 'Party Ledger', group: 'Accounts', filters: ['party', 'from', 'to'] },
+  labourPayable: { title: 'Labour Payable', group: 'Accounts', filters: ['process', 'from', 'to'] },
   gst: { title: 'GST Summary', group: 'Accounts', filters: ['from', 'to'] },
 };

@@ -12,7 +12,7 @@
  * adds its own labour / chemicals / wastage. The finished lot therefore knows
  * exactly what it cost and why.
  */
-const { r2, r3, num, applyTotals, partyIs, STATE_NAMES, checkGstin, levelAtLeast } = require('../public/js/shared');
+const { r2, r3, num, applyTotals, partyIs, STATE_NAMES, checkGstin, levelAtLeast, STAGES, STAGE_LABELS, parseRolls, fmtRolls, allocRolls, LOT_CATEGORIES, lotFmt, mainLot } = require('../public/js/shared');
 
 const BUCKETS = ['yarn', 'dyes', 'packing', 'otherMat', 'knitLabour', 'dyeLabour', 'finLabour', 'overhead', 'wastage'];
 const CAT_BUCKET = { 'Yarn': 'yarn', 'Dyes & Chemicals': 'dyes', 'Packing Material': 'packing' };
@@ -29,6 +29,25 @@ const today = () => { const d = new Date(); return d.getFullYear() + '-' + Strin
 const inRange = (d, q) => (!q.from || d >= q.from) && (!q.to || d <= q.to);
 const byDate = (a, b) => (a.date || '').localeCompare(b.date || '') || (a.createdAt || '').localeCompare(b.createdAt || '');
 
+// One lot number per lot of material, from the GRN (or opening stock) to the sale: L-0001, L-0002 ...
+// Returns a function that hands out the next free number each time it is called.
+function lotMaker(data) {
+  const used = new Set();
+  const add = v => { if (v) used.add(String(v).trim().toUpperCase()); };
+  for (const c of STOCK_COLS) for (const d of data[c] || []) { add(d.lotNo); add(d.outLot); for (const l of d.lines || []) add(l.lot); }
+  let n = 0;
+  for (const v of used) { const m = /^L-(\d+)$/.exec(v); if (m) n = Math.max(n, parseInt(m[1], 10)); }
+  const next = () => { let v; do v = lotFmt(++n); while (used.has(v)); used.add(v); return v; };
+  next.exists = lot => used.has(String(lot).trim().toUpperCase());
+  return next;
+}
+
+// Is this lot of this item taken further by another entry (dyed, finished, moved or sold)?
+function lotUsed(data, lot, item, selfId) {
+  return ['dyeing', 'finishing'].some(c => (data[c] || []).some(d => d.id !== selfId && d.lotNo === lot && d.inItem === item)) ||
+    ['transfers', 'deliveries', 'invoices', 'stockAdjust'].some(c => (data[c] || []).some(d => d.id !== selfId && (d.lines || []).some(l => l.lot === lot && l.item === item)));
+}
+
 /* ------------------------------------------------------------------ */
 /* Replay                                                              */
 /* ------------------------------------------------------------------ */
@@ -41,22 +60,27 @@ function compute(data) {
   const keys = new Map();
   const ledger = [], errors = [], wastage = [], production = [], fgLots = [];
   const unitCost = {};     // "docId|item|lot" -> cost per unit sold (deliveries / direct invoices)
-  const rootOf = {};       // any lot -> originating knitting lot
+  const rootOf = {};       // any lot -> the lot it started as (only differs for lots split before lot numbers ran through)
   const lotInfo = {};      // root lot -> trace
-  const colorOf = {};      // colored/finished lot -> color
+  const colorOf = {};      // "item|lot" of colored / finished fabric -> color(s)
+  const salePieces = {};   // "docId|line index" -> rolls taken by a challan / direct invoice line [{ no, kg }]
 
+  // Each stock line counts its rolls. Rolls weighed one by one (finished goods) are kept in `bag`
+  // as { no, kg }; `rolls` counts the rest, whose weights were never entered.
   const K = (item, loc, lot) => {
     const k = item + '|' + loc + '|' + (lot || '');
     let s = keys.get(k);
-    if (!s) { s = { key: k, item, loc, lot: lot || '', layers: [], neg: 0, rolls: 0, lastUnit: null }; keys.set(k, s); }
+    if (!s) { s = { key: k, item, loc, lot: lot || '', layers: [], neg: 0, rolls: 0, bag: [], nextRoll: 1, lastUnit: null }; keys.set(k, s); }
     return s;
   };
   const matVec = (itemId, value) => { const v = vz(); const it = items[itemId]; v[CAT_BUCKET[it && it.category] || 'otherMat'] = value; return v; };
 
-  function stockIn(ev, item, loc, lot, qty, vec, rolls) {
+  function stockIn(ev, item, loc, lot, qty, vec, rolls, weights) {
     if (!(qty > EPS) || !item || !loc) return;
     const s = K(item, loc, lot);
-    s.rolls += num(rolls);
+    const moves = [];
+    if (weights && weights.length) for (const kg of weights) { const no = s.nextRoll++; s.bag.push({ no, kg: r3(kg) }); moves.push([no, r3(kg)]); }
+    else s.rolls += num(rolls);
     s.lastUnit = vscale(vec, 1 / qty);
     let q = qty, v = vec;
     if (s.neg > EPS) { const c = Math.min(s.neg, q); s.neg -= c; v = vscale(vec, (q - c) / q); q -= c; }
@@ -64,14 +88,31 @@ function compute(data) {
       if (method === 'AVG' && s.layers.length) { s.layers[0].qty += q; vadd(s.layers[0].vec, v); }
       else s.layers.push({ qty: q, vec: Object.assign({}, v) });
     }
-    ledger.push({ date: ev.date, col: ev.col, docId: ev.doc.id, docNo: ev.doc.no, item, loc, lot: lot || '', qin: qty, qout: 0, value: vsum(vec), rolls: num(rolls), party: ev.doc.party || '' });
+    ledger.push({ date: ev.date, col: ev.col, docId: ev.doc.id, docNo: ev.doc.no, item, loc, lot: lot || '', qin: qty, qout: 0, value: vsum(vec), rolls: moves.length ? 0 : num(rolls), rollMoves: moves.length ? moves : undefined, party: ev.doc.party || '' });
   }
 
-  function stockOut(ev, item, loc, lot, qty, rolls) {
+  // Weighed rolls leave as picked on the document (`pick`), or else in roll order: whole rolls
+  // first and the last one cut. The pieces taken are left in `lastPieces` for the caller.
+  let lastPieces = [];
+  function stockOut(ev, item, loc, lot, qty, rolls, pick) {
     const out = vz();
+    lastPieces = [];
     if (!(qty > EPS) || !item || !loc) return out;
     const s = K(item, loc, lot);
-    s.rolls -= num(rolls);
+    const moves = [];
+    if (s.bag.length) {
+      const picks = pick && pick.length ? pick : allocRolls(s.bag, qty).picks;
+      for (const p of picks) {
+        const r = s.bag.find(x => x.no === p.no);
+        if (!r || r.kg < p.kg - 0.0005) errors.push({ key: s.key + '|roll' + p.no, date: ev.date, col: ev.col, docId: ev.doc.id, docNo: ev.doc.no, item, loc, lot: lot || '', short: r3(p.kg - (r ? r.kg : 0)), roll: p.no, have: r ? r3(r.kg) : 0 });
+        if (!r) continue;
+        const take = r3(Math.min(r.kg, p.kg));
+        r.kg = r3(r.kg - take);
+        moves.push([p.no, -take]);
+        lastPieces.push({ no: p.no, kg: take });
+      }
+      s.bag = s.bag.filter(x => x.kg > 0.0005);
+    } else s.rolls -= num(rolls);
     let need = qty;
     while (need > EPS && s.layers.length) {
       const L = s.layers[0];
@@ -83,7 +124,7 @@ function compute(data) {
       if (s.lastUnit) vadd(out, s.lastUnit, need);
       s.neg += need;
     }
-    ledger.push({ date: ev.date, col: ev.col, docId: ev.doc.id, docNo: ev.doc.no, item, loc, lot: lot || '', qin: 0, qout: qty, value: -vsum(out), rolls: -num(rolls), party: ev.doc.party || '' });
+    ledger.push({ date: ev.date, col: ev.col, docId: ev.doc.id, docNo: ev.doc.no, item, loc, lot: lot || '', qin: 0, qout: qty, value: -vsum(out), rolls: moves.length ? 0 : -num(rolls), rollMoves: moves.length ? moves : undefined, party: ev.doc.party || '' });
     return out;
   }
 
@@ -93,7 +134,15 @@ function compute(data) {
   for (const o of data.overheads || []) { const m = (o.date || '').slice(0, 7); ohByMonth[m] = (ohByMonth[m] || 0) + num(o.amount); }
   const ohRate = m => fgKgByMonth[m] ? (ohByMonth[m] || 0) / fgKgByMonth[m] : 0;
 
-  const trace = root => lotInfo[root] || (lotInfo[root] = { lot: root, knit: [], dye: [], fin: [] });
+  const trace = root => lotInfo[root] || (lotInfo[root] = { lot: root, buy: [], knit: [], dye: [], fin: [] });
+  const tracked = itemId => LOT_CATEGORIES.includes((items[itemId] || {}).category);
+  const received = (d, l, party) => { if (l.lot && tracked(l.item)) trace(l.lot).buy.push({ date: d.date, docNo: d.no, party, item: l.item, qty: num(l.qty) }); };
+  const ck = (item, lot) => item + '|' + (lot || '');
+  const addColor = (k, c) => {
+    const have = colorOf[k] ? colorOf[k].split(', ') : [];
+    for (const x of String(c || '').split(', ')) if (x && !have.includes(x)) have.push(x);
+    if (have.length) colorOf[k] = have.join(', ');
+  };
 
   // One production stage: material in, (chemicals/packing/labour/overhead) added, good output + wastage out.
   function stage(ev, name, fabricVec, inQ, inItem, labourBucket, addVec, outLoc) {
@@ -108,7 +157,7 @@ function compute(data) {
     outVec.wastage += wasteVal - scrap;
     outVec[labourBucket] += num(d.labour);
     const outLot = d.outLot || d.lotNo;
-    stockIn(ev, d.outItem, outLoc, outLot, outQ, outVec, d.rolls);
+    stockIn(ev, d.outItem, outLoc, outLot, outQ, outVec, d.rolls, ev.col === 'finishing' ? parseRolls(d.rollWeights) : null);
 
     const row = {
       date: d.date, stage: name, col: ev.col, docId: d.id, docNo: d.no, lot: d.lotNo, outLot,
@@ -132,20 +181,20 @@ function compute(data) {
         const loc = d.location || 'STORE';
         for (const l of lines) {
           const q = num(l.qty);
-          if (q > 0) stockIn(ev, l.item, loc, l.lot, q, matVec(l.item, q * num(l.rate)), l.rolls);
-          else if (q < 0) stockOut(ev, l.item, loc, l.lot, -q, l.rolls);
+          if (q > 0) { stockIn(ev, l.item, loc, l.lot, q, matVec(l.item, q * num(l.rate)), l.rolls, parseRolls(l.rollWeights)); received(d, l, ''); }
+          else if (q < 0) stockOut(ev, l.item, loc, l.lot, -q, l.rolls, l.rollPick);
         }
         break;
       }
       case 'grn': {
         const loc = d.location || 'STORE';
-        for (const l of lines) stockIn(ev, l.item, loc, l.lot, num(l.qty), matVec(l.item, num(l.qty) * num(l.rate)), l.rolls);
+        for (const l of lines) { stockIn(ev, l.item, loc, l.lot, num(l.qty), matVec(l.item, num(l.qty) * num(l.rate)), l.rolls); received(d, l, d.party); }
         break;
       }
       case 'transfers': {
         for (const l of lines) {
-          const v = stockOut(ev, l.item, d.fromLoc, l.lot, num(l.qty), l.rolls);
-          stockIn(ev, l.item, d.toLoc, l.lot, num(l.qty), v, l.rolls);
+          const v = stockOut(ev, l.item, d.fromLoc, l.lot, num(l.qty), l.rolls, l.rollPick);
+          stockIn(ev, l.item, d.toLoc, l.lot, num(l.qty), v, l.rolls, lastPieces.map(p => p.kg)); // weighed rolls arrive weighed
         }
         break;
       }
@@ -153,7 +202,9 @@ function compute(data) {
         const loc = d.location || 'KNIT';
         const cons = vz(); let inQ = 0;
         for (const l of lines) { inQ += num(l.qty); vadd(cons, stockOut(ev, l.item, loc, l.lot, num(l.qty))); }
-        const row = stage(ev, 'Knitting', cons, inQ, (lines[0] || {}).item, 'knitLabour', vz(), loc);
+        // Grey fabric goes straight to the Color Factory (outLoc 'DYE'). Entries made before this option
+        // existed have no outLoc and kept their grey at the Knitting Factory (moved later by a transfer).
+        const row = stage(ev, 'Knitting', cons, inQ, (lines[0] || {}).item, 'knitLabour', vz(), d.outLoc || loc);
         rootOf[row.outLot] = d.lotNo;
         trace(d.lotNo).knit.push(row);
         break;
@@ -166,7 +217,7 @@ function compute(data) {
         const row = stage(ev, 'Dyeing', fv, inQ, d.inItem, 'dyeLabour', chem, 'DYE');
         const root = rootOf[d.lotNo] || d.lotNo;
         rootOf[row.outLot] = root;
-        colorOf[row.outLot] = d.color || '';
+        addColor(ck(d.outItem, row.outLot), d.color);
         trace(root).dye.push(row);
         break;
       }
@@ -179,26 +230,27 @@ function compute(data) {
         const row = stage(ev, 'Finishing', fv, inQ, d.inItem, 'finLabour', add, 'FG');
         const root = rootOf[d.lotNo] || d.lotNo;
         rootOf[row.outLot] = root;
-        colorOf[row.outLot] = colorOf[d.lotNo] || d.color || '';
+        addColor(ck(d.outItem, row.outLot), colorOf[ck(d.inItem, d.lotNo)] || d.color);
         trace(root).fin.push(row);
-        fgLots.push({ date: d.date, docId: d.id, docNo: d.no, lot: row.outLot, root, item: d.outItem, qty: num(d.outQty), rolls: num(d.rolls), meters: num(d.meters), vec: row.vec, color: colorOf[row.outLot] });
+        fgLots.push({ date: d.date, docId: d.id, docNo: d.no, lot: row.outLot, root, item: d.outItem, qty: num(d.outQty), rolls: num(d.rolls), meters: num(d.meters), vec: row.vec, color: colorOf[ck(d.outItem, row.outLot)] || '' });
         break;
       }
       case 'deliveries':
       case 'invoices': {
         if (ev.col === 'invoices' && d.challanId) break; // stock already left with the challan
         const loc = d.location || 'FG';
-        for (const l of lines) {
+        lines.forEach((l, i) => {
           const q = num(l.qty);
-          const v = stockOut(ev, l.item, loc, l.lot, q, l.rolls);
+          const v = stockOut(ev, l.item, loc, l.lot, q, l.rolls, l.rollPick);
+          if (lastPieces.length) salePieces[d.id + '|' + i] = lastPieces;
           if (q > 0) unitCost[d.id + '|' + l.item + '|' + (l.lot || '')] = vsum(v) / q;
-        }
+        });
         break;
       }
     }
   }
 
-  return { keys, ledger, errors, wastage, production, fgLots, unitCost, rootOf, lotInfo, colorOf, ohByMonth, fgKgByMonth, method };
+  return { keys, ledger, errors, wastage, production, fgLots, unitCost, salePieces, rootOf, lotInfo, colorOf, ohByMonth, fgKgByMonth, method };
 }
 
 /* ------------------------------------------------------------------ */
@@ -252,9 +304,64 @@ function prepare(col, doc, data) {
   if (Array.isArray(doc.lines)) {
     doc.lines = doc.lines.filter(l => l && l.item).map(l => { const c = {}; for (const k of Object.keys(l)) if (!k.startsWith('_')) c[k] = l[k]; return c; });
   }
+  // Roll weights typed as "20.2 + 50.3 + 39.5" set the kg and the number of rolls.
+  const weighed = (o, qtyKey) => {
+    if (String(o.rollWeights || '').trim() === '') { delete o.rollWeights; return; }
+    const w = parseRolls(o.rollWeights);
+    if (!w) return; // validate() explains the problem
+    if (!w.length) { delete o.rollWeights; return; }
+    o.rollWeights = fmtRolls(w); o[qtyKey] = r3(w.reduce((t, x) => t + x, 0)); o.rolls = w.length;
+  };
+  if (col === 'finishing') weighed(doc, 'outQty');
+  for (const l of doc.lines || []) {
+    if (col === 'stockAdjust' && num(l.qty) >= 0) weighed(l, 'qty'); else delete l.rollWeights;
+    // Rolls picked on a challan / invoice / transfer: the roll count is the number of pieces
+    // (validate() checks they add up to the line's kg).
+    if (!Array.isArray(l.rollPick)) { delete l.rollPick; continue; }
+    const p = l.rollPick.map(x => ({ no: Math.round(num(x && x.no)), kg: r3(num(x && x.kg)) })).filter(x => x.no > 0 && x.kg > 0);
+    if (!p.length) { delete l.rollPick; continue; }
+    l.rollPick = p; l.rolls = p.length;
+  }
+  lotNumbers(col, doc, data);
   const party = (data.parties || []).find(p => p.id === doc.party);
   applyTotals(col, doc, data.settings, party);
   return doc;
+}
+
+// The lot number is given once, when yarn or fabric comes in, and the same number follows it to the sale:
+//   GRN / opening stock line  -> new lot L-0001 ...
+//   knitting                  -> the lot of the main yarn (the yarn line with the most kg)
+//   dyeing, finishing         -> the lot taken in (no new number)
+function lotNumbers(col, doc, data) {
+  const old = doc.id ? (data[col] || []).find(r => r.id === doc.id) : null;
+  const cat = id => ((data.items || []).find(i => i.id === id) || {}).category;
+  let maker = null;
+  const lots = () => (maker = maker || lotMaker(data));
+  const newLot = () => lots()();
+  if (col === 'grn' || col === 'stockAdjust') {
+    const oldLots = new Set(((old && old.lines) || []).map(l => l.lot).filter(Boolean));
+    // Entries saved before lot numbers were automatic may hold yarn without a lot: those lines stay as they were.
+    const legacy = new Set(((old && old.lines) || []).filter(l => !l.lot).map(l => l.item));
+    for (const l of doc.lines || []) {
+      l.lot = String(l.lot || '').trim();
+      if (!LOT_CATEGORIES.includes(cat(l.item))) continue;
+      if (col === 'stockAdjust' && !(num(l.qty) > 0)) continue; // a - line takes from the lot chosen
+      // Keep the lot this entry already gave, or (opening stock) add to a lot that exists; anything else gets a new number.
+      if (l.lot && (oldLots.has(l.lot) || (col === 'stockAdjust' && lots().exists(l.lot)))) continue;
+      if (!l.lot && legacy.has(l.item)) continue;
+      l.lot = newLot();
+    }
+  }
+  if (col === 'knitting') {
+    const yarnLot = mainLot(doc.lines);
+    // Once its grey fabric has been dyed, moved or sold, a saved entry keeps its lot number.
+    const keep = old && old.lotNo && lotUsed(data, old.lotNo, old.outItem, doc.id);
+    doc.lotNo = keep ? old.lotNo : yarnLot || (old && old.lotNo) || newLot();
+  }
+  if (col === 'dyeing' || col === 'finishing') {
+    // Entries saved before this rule may have given the output its own lot (L-0005-R): they keep it.
+    if (old && old.outLot && old.outLot !== old.lotNo) doc.outLot = old.outLot; else delete doc.outLot;
+  }
 }
 
 function validate(col, doc, data) {
@@ -262,6 +369,14 @@ function validate(col, doc, data) {
   const isDoc = col in DOC_LABELS;
   if (isDoc) need(/^\d{4}-\d{2}-\d{2}$/.test(doc.date || ''), 'Date is required');
   const lines = doc.lines || [];
+  const rollsMsg = 'Roll weights: type the kg of each roll separated by + (for example 20.2 + 50.3 + 39.5)';
+  if (doc.rollWeights !== undefined) need(parseRolls(doc.rollWeights), rollsMsg);
+  for (const l of lines) if (l.rollWeights !== undefined) need(parseRolls(l.rollWeights), rollsMsg);
+  lines.forEach((l, i) => {
+    if (!l.rollPick) return;
+    const kg = r3(l.rollPick.reduce((t, x) => t + x.kg, 0));
+    need(Math.abs(kg - Math.abs(num(l.qty))) < 0.001, 'Line ' + (i + 1) + ': the rolls chosen add up to ' + kg + ' kg but the quantity is ' + num(l.qty) + ' kg');
+  });
   const posLines = () => { need(lines.length > 0, 'Add at least one line item'); for (const l of lines) need(num(l.qty) > 0, 'Every line needs a quantity greater than zero'); };
   const unique = (field, label) => {
     const v = (doc[field] || '').toString().trim().toLowerCase();
@@ -296,10 +411,12 @@ function validate(col, doc, data) {
       need(doc.party, 'Party is required'); posLines(); break;
     case 'payments': case 'receipts': need(doc.party, 'Party is required'); need(num(doc.amount) > 0, 'Amount must be greater than zero'); break;
     case 'overheads': need(doc.category, 'Category is required'); need(num(doc.amount) > 0, 'Amount must be greater than zero'); break;
+    case 'labourPayments': need(STAGES.includes(doc.stage), 'Choose the process the labour was paid for'); need(num(doc.amount) > 0, 'Amount must be greater than zero'); break;
     case 'transfers': need(doc.fromLoc && doc.toLoc, 'From and To locations are required'); need(doc.fromLoc !== doc.toLoc, 'From and To locations must differ'); posLines(); break;
     case 'stockAdjust': need(doc.location, 'Location is required'); need(lines.length, 'Add at least one line'); for (const l of lines) need(num(l.qty) !== 0, 'Quantity cannot be zero'); break;
     case 'knitting':
-      unique('lotNo', 'Lot number'); posLines();
+      posLines();
+      if (doc.outLoc) need(['DYE', 'KNIT'].includes(doc.outLoc), 'Grey fabric must go to the Color Factory or stay at the Knitting Factory');
       need(doc.outItem, 'Output grey fabric item is required'); need(num(doc.outQty) > 0, 'Output quantity is required'); break;
     case 'dyeing': case 'finishing':
       need(doc.inItem && doc.lotNo, 'Input item and lot are required'); need(num(doc.inQty) > 0, 'Input quantity is required');
@@ -314,6 +431,7 @@ const DOC_LABELS = {
   purchaseOrders: 'Purchase Order', grn: 'GRN', purchaseBills: 'Purchase Bill', payments: 'Payment',
   transfers: 'Transfer', stockAdjust: 'Stock Adjustment', knitting: 'Knitting', dyeing: 'Dyeing', finishing: 'Finishing',
   overheads: 'Overhead', salesOrders: 'Sales Order', deliveries: 'Delivery Challan', invoices: 'Invoice', receipts: 'Receipt',
+  labourPayments: 'Labour Payment',
 };
 
 /* ------------------------------------------------------------------ */
@@ -378,12 +496,33 @@ function buildReports(ctx) {
     return { from, to, prevFrom, prevTo, days, byDay, labels: keys, series, cur: { from, to }, prev: { from: prevFrom, to: prevTo } };
   }
 
+  const qsOf = o => { const p = Object.entries(o).filter(([, v]) => v !== '' && v !== undefined && v !== null).map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&'); return p ? '?' + p : ''; };
+
+  // Labour in date order: earned on production entries, paid by labour payments. Anything dated before
+  // the "count labour payable from" date in Settings is treated as already settled.
+  function labourEvents() {
+    const start = data.settings.labourFrom || '';
+    const docs = { knitting: index(data.knitting), dyeing: index(data.dyeing), finishing: index(data.finishing) };
+    const ev = [];
+    R.production.forEach((r, i) => {
+      if (!num(r.labour) || (start && r.date < start)) return;
+      const d = docs[r.col][r.docId] || {};
+      const kg = r.stage === 'Dyeing' ? r.inQty : r.outQty;
+      ev.push({ date: r.date || '', stage: r.stage, doc: docName(r.col) + ' ' + (r.docNo || ''), lot: r.lot || '', kg, rate: num(d.labourRate) || (kg ? r.labour / kg : 0), earned: r.labour, paid: 0, paidTo: '', _link: link(r.col, r.docId), o: i });
+    });
+    (data.labourPayments || []).forEach((p, j) => {
+      if (start && p.date < start) return;
+      ev.push({ date: p.date || '', stage: p.stage, doc: 'Payment ' + (p.no || ''), lot: '', kg: 0, rate: 0, earned: 0, paid: num(p.amount), paidTo: [p.paidTo, p.mode].filter(Boolean).join(' · '), _link: link('labourPayments', p.id), o: 1e6 + j });
+    });
+    return ev.sort((a, b) => a.date.localeCompare(b.date) || a.o - b.o);
+  }
+
   return {
     stockChoices() {
       const rows = [];
       for (const s of R.keys.values()) {
         const qty = s.layers.reduce((a, l) => a + l.qty, 0) - s.neg;
-        if (Math.abs(qty) > EPS) rows.push({ item: s.item, loc: s.loc, lot: s.lot, qty: r3(qty), rolls: s.rolls });
+        if (Math.abs(qty) > EPS) rows.push(Object.assign({ item: s.item, loc: s.loc, lot: s.lot, qty: r3(qty), rolls: s.rolls + s.bag.length }, s.bag.length ? { bag: s.bag.map(r => ({ no: r.no, kg: r.kg })) } : {}));
       }
       return { rows };
     },
@@ -396,20 +535,23 @@ function buildReports(ctx) {
         const m = new Map();
         for (const r of rows) {
           const k = r.item + '|' + r.loc;
-          const s = m.get(k) || { item: r.item, loc: r.loc, lot: '', qty: 0, value: 0, rolls: 0 };
+          const s = m.get(k) || { item: r.item, loc: r.loc, lot: '', qty: 0, value: 0, rolls: 0, weights: [] };
           s.qty += r.qty; s.value += r.value; s.rolls += r.rolls; m.set(k, s);
         }
         rows = [...m.values()];
       }
       if (!q.zero) rows = rows.filter(r => Math.abs(r.qty) > 0.0005);
       const out = rows.map(r => ({
-        item: iName(r.item), category: iCat(r.item), location: lName(r.loc), lot: r.lot,
-        qty: r3(r.qty), unit: iUnit(r.item), rolls: Math.round(r.rolls), value: r2(r.value), rate: r.qty ? r2(r.value / r.qty) : 0,
+        item: iName(r.item), category: iCat(r.item), location: lName(r.loc), lot: r.lot, color: r.lot ? R.colorOf[r.item + '|' + r.lot] || '' : '',
+        qty: r3(r.qty), unit: iUnit(r.item), rolls: Math.round(r.rolls), weights: fmtRolls(r.weights), value: r2(r.value), rate: r.qty ? r2(r.value / r.qty) : 0,
         reorder: items[r.item] && num(items[r.item].reorderLevel) && r.qty < num(items[r.item].reorderLevel) ? 'Below reorder' : '',
       })).sort((a, b) => a.location.localeCompare(b.location) || a.item.localeCompare(b.item) || a.lot.localeCompare(b.lot));
+      const anyWeights = out.some(r => r.weights);
       return {
-        title: 'Stock Summary' + (q.asOn ? ' as on ' + q.asOn : ''), note: 'Valuation method: ' + (R.method === 'FIFO' ? 'FIFO' : 'Weighted average') + '. Lots are valued at their exact accumulated cost.',
-        columns: [C('location', 'Location'), C('item', 'Item'), C('category', 'Category'), C('lot', 'Lot / Batch'), C('qty', 'Qty', 'qty', true), C('unit', 'Unit'), C('rolls', 'Rolls', 'int', true), C('rate', 'Avg Rate', 'money'), C('value', 'Value', 'money', true), C('reorder', 'Alert', 'flag')],
+        title: 'Stock Summary' + (q.asOn ? ' as on ' + q.asOn : ''),
+        note: 'Valuation method: ' + (R.method === 'FIFO' ? 'FIFO' : 'Weighted average') + '. Lots are valued at their exact accumulated cost.' + (anyWeights ? ' Roll weights are the kg left on each roll; a cut roll shows what remains of it.' : ''),
+        columns: [C('location', 'Location'), C('item', 'Item'), C('category', 'Category'), C('lot', 'Lot / Batch'), C('color', 'Color'), C('qty', 'Qty', 'qty', true), C('unit', 'Unit'), C('rolls', 'Rolls', 'int', true)]
+          .concat(anyWeights ? [C('weights', 'Roll weights (kg)')] : [], [C('rate', 'Avg Rate', 'money'), C('value', 'Value', 'money', true), C('reorder', 'Alert', 'flag')]),
         rows: out,
       };
     },
@@ -526,35 +668,41 @@ function buildReports(ctx) {
     },
 
     lots() {
-      const fgSold = {}, fgIn = {};
+      const fgSold = {}, fgIn = {}, left = {};
       for (const r of R.ledger) {
-        if (r.loc !== 'FG' || !r.lot) continue;
+        if (!r.lot) continue;
+        left[r.lot] = (left[r.lot] || 0) + r.qin - r.qout;
+        if (r.loc !== 'FG') continue;
         if (r.col === 'deliveries' || r.col === 'invoices') fgSold[r.lot] = (fgSold[r.lot] || 0) + r.qout;
         fgIn[r.lot] = (fgIn[r.lot] || 0) + r.qin - r.qout;
       }
       const sum = (arr, k) => arr.reduce((s, x) => s + x[k], 0);
       const rows = Object.values(R.lotInfo).filter(t => !q.lot || t.lot.toLowerCase().includes(q.lot.toLowerCase())).map(t => {
-        const k = t.knit, d = t.dye, f = t.fin;
-        const fgLotsOf = [...new Set(f.map(x => x.outLot))];
+        const b = t.buy, k = t.knit, d = t.dye, f = t.fin;
+        const lotsOf = [...new Set([t.lot].concat(f.map(x => x.outLot)))];
         const yarn = sum(k, 'inQty'), fg = sum(f, 'outQty');
-        const sold = fgLotsOf.reduce((s, l) => s + (fgSold[l] || 0), 0);
-        const inStock = fgLotsOf.reduce((s, l) => s + (fgIn[l] || 0), 0);
-        let status = 'Knitted';
+        const sold = lotsOf.reduce((s, l) => s + (fgSold[l] || 0), 0);
+        const inStock = lotsOf.reduce((s, l) => s + (fgIn[l] || 0), 0);
+        let status = 'In store';
+        if (k.length) status = 'Knitted';
         if (d.length) status = 'Dyed';
         if (f.length) status = 'Finished';
-        if (f.length && inStock < 0.001) status = 'Sold out';
+        if ((f.length || sold > 0) && inStock < 0.001) status = 'Sold out';
+        else if (!k.length && !sold && (left[t.lot] || 0) < 0.001) status = 'Used up';
         const first = a => a.length ? a[0].date : '';
         return {
-          lot: t.lot, status, knitDate: first(k), yarnIn: r3(yarn), greyOut: r3(sum(k, 'outQty')), knitWaste: r3(sum(k, 'wastageQty')),
+          lot: t.lot, status, supplier: [...new Set(b.map(x => pName(x.party)).filter(Boolean))].join(', ') || (b.length ? 'Opening stock' : ''),
+          recdDate: first(b), recdQty: r3(sum(b, 'qty')),
+          knitDate: first(k), yarnIn: r3(yarn), greyOut: r3(sum(k, 'outQty')), knitWaste: r3(sum(k, 'wastageQty')),
           dyeDate: first(d), color: d.map(x => x.color).filter(Boolean).join(', '), dyeIn: r3(sum(d, 'inQty')), dyeOut: r3(sum(d, 'outQty')), dyeWaste: r3(sum(d, 'wastageQty')),
           finDate: first(f), finIn: r3(sum(f, 'inQty')), fgOut: r3(fg), finWaste: r3(sum(f, 'wastageQty')),
           yieldPct: yarn && fg ? r2(fg / yarn * 100) : 0, sold: r3(sold), inStock: r3(inStock),
         };
-      }).sort((a, b) => (b.knitDate || '').localeCompare(a.knitDate || ''));
+      }).sort((a, b) => (b.recdDate || b.knitDate || '').localeCompare(a.recdDate || a.knitDate || '') || b.lot.localeCompare(a.lot));
       return {
         title: 'Batch / Lot Tracking',
-        note: 'Follows each knitting lot through dyeing and finishing to sales. Yield = finished kg / yarn kg.',
-        columns: [C('lot', 'Lot'), C('status', 'Status', 'flag'), C('knitDate', 'Knitted', 'date'), C('yarnIn', 'Yarn Kg', 'qty', true), C('greyOut', 'Grey Kg', 'qty', true), C('knitWaste', 'Knit Waste', 'qty', true),
+        note: 'Follows each lot number from the GRN through knitting, dyeing and finishing to sales. The lot number never changes. Yield = finished kg / yarn kg knitted.',
+        columns: [C('lot', 'Lot'), C('status', 'Status', 'flag'), C('supplier', 'Supplier'), C('recdDate', 'Received', 'date'), C('recdQty', 'Recd Kg', 'qty', true), C('knitDate', 'Knitted', 'date'), C('yarnIn', 'Yarn Kg', 'qty', true), C('greyOut', 'Grey Kg', 'qty', true), C('knitWaste', 'Knit Waste', 'qty', true),
           C('dyeDate', 'Dyed', 'date'), C('color', 'Color'), C('dyeIn', 'Dye In', 'qty', true), C('dyeOut', 'Dyed Kg', 'qty', true), C('dyeWaste', 'Dye Waste', 'qty', true),
           C('finDate', 'Finished', 'date'), C('finIn', 'Finish In', 'qty', true), C('fgOut', 'FG Kg', 'qty', true), C('finWaste', 'Finish Waste', 'qty', true),
           C('yieldPct', 'Yield %', 'pct'), C('sold', 'Sold Kg', 'qty', true), C('inStock', 'FG Stock Kg', 'qty', true)],
@@ -731,7 +879,7 @@ function buildReports(ctx) {
       return {
         title: 'Stock Exceptions',
         columns: [C('date', 'Date', 'date'), C('doc', 'Document'), C('item', 'Item'), C('location', 'Location'), C('lot', 'Lot'), C('short', 'Short Qty', 'qty')],
-        rows: R.errors.map(e => ({ date: e.date, doc: docName(e.col) + ' ' + (e.docNo || ''), item: iName(e.item), location: lName(e.loc), lot: e.lot, short: e.short, _link: link(e.col, e.docId) })),
+        rows: R.errors.map(e => ({ date: e.date, doc: docName(e.col) + ' ' + (e.docNo || ''), item: iName(e.item), location: lName(e.loc), lot: e.lot + (e.roll ? ' (roll ' + e.roll + ')' : ''), short: e.short, _link: link(e.col, e.docId) })),
       };
     },
 
@@ -740,10 +888,54 @@ function buildReports(ctx) {
       return { balance: r2(bal[q.party] || 0) };
     },
 
+    // Labour earned on production entries (rate x kg) against labour payments, per process.
+    labourPayable() {
+      const from = q.from || '', to = q.to || '9999-12-31';
+      const stages = STAGES.filter(s => !q.stage || s === q.stage);
+      const ev = labourEvents();
+      const sum = {};
+      for (const s of stages) sum[s] = { stage: STAGE_LABELS[s], kg: 0, opening: 0, earned: 0, paid: 0, closing: 0, _link: '#/report/labourPayable' + qsOf(Object.assign({}, q, { stage: s })) };
+      for (const e of ev) if (sum[e.stage] && e.date < from) sum[e.stage].opening += e.earned - e.paid;
+      const bal = {};
+      const rows = [];
+      for (const st of stages) {
+        bal[st] = sum[st].opening;
+        if (Math.abs(bal[st]) > 0.005) rows.push({ date: from, stage: STAGE_LABELS[st], doc: 'Opening balance', balance: r2(bal[st]) });
+      }
+      for (const e of ev) {
+        const s = sum[e.stage];
+        if (!s || e.date < from || e.date > to) continue;
+        s.kg += e.kg; s.earned += e.earned; s.paid += e.paid;
+        bal[e.stage] += e.earned - e.paid;
+        rows.push({ date: e.date, stage: s.stage, doc: e.doc, lot: e.lot, kg: e.kg ? r3(e.kg) : '', rate: e.rate ? r2(e.rate) : '', paidTo: e.paidTo, earned: e.earned ? r2(e.earned) : '', paid: e.paid ? r2(e.paid) : '', balance: r2(bal[e.stage]), _link: e._link });
+      }
+      const summary = stages.map(st => { const s = sum[st]; return Object.assign(s, { kg: r3(s.kg), opening: r2(s.opening), earned: r2(s.earned), paid: r2(s.paid), closing: r2(s.opening + s.earned - s.paid) }); });
+      const total = summary.reduce((t, s) => t + s.closing, 0);
+      const start = data.settings.labourFrom;
+      return {
+        title: 'Labour Payable' + (q.stage ? ' - ' + STAGE_LABELS[q.stage] : ''),
+        note: 'Labour is earned on each production entry (knitting and finishing on output kg, dyeing on input kg) and reduced by Labour Payments. ' +
+          (start ? 'Counted from ' + start.split('-').reverse().join('-') + ' (set in Settings).' : 'Counted from the first production entry; an administrator can set a start date in Settings.'),
+        cards: summary.map(s => ({ label: s.stage + ' payable', value: s.closing, type: 'money' })).concat(stages.length > 1 ? [{ label: 'Total labour payable', value: r2(total), type: 'money' }] : []),
+        tables: [
+          { title: 'Payable by process' + (q.to ? ' as on ' + q.to.split('-').reverse().join('-') : ''),
+            columns: [C('stage', 'Process'), C('kg', 'Kg worked', 'qty', true), C('opening', 'Opening payable', 'money', true), C('earned', 'Labour earned', 'money', true), C('paid', 'Paid', 'money', true), C('closing', 'Payable now', 'money', true)],
+            rows: summary },
+          { title: 'Labour ledger',
+            columns: [C('date', 'Date', 'date'), C('stage', 'Process'), C('doc', 'Entry'), C('lot', 'Lot'), C('kg', 'Kg', 'qty', true), C('rate', 'Rate / kg', 'money'), C('paidTo', 'Paid to'), C('earned', 'Earned', 'money', true), C('paid', 'Paid', 'money', true), C('balance', 'Process balance', 'money')],
+            rows },
+        ],
+      };
+    },
+
+    // Still payable for one process (shown on the labour payment form).
+    labourBalance() {
+      const ev = labourEvents().filter(e => e.stage === q.stage);
+      return { payable: r2(ev.reduce((t, e) => t + e.earned - e.paid, 0)) };
+    },
+
     nextLot() {
-      let max = 0;
-      for (const k of data.knitting) { const m = /(\d+)\s*$/.exec(k.lotNo || ''); if (m) max = Math.max(max, parseInt(m[1], 10)); }
-      return { lot: 'L-' + String(max + 1).padStart(4, '0') };
+      return { lot: lotMaker(data)() };
     },
 
     // Department analytics: only the sections the signed-in user's role may view.
@@ -1122,10 +1314,17 @@ function reportImpl(name, data, q, version, perms) {
         if (asOn && r.date > asOn) continue;
         const k = r.item + '|' + r.loc + '|' + r.lot;
         let s = m.get(k);
-        if (!s) { s = { item: r.item, loc: r.loc, lot: r.lot, qty: 0, value: 0, rolls: 0 }; m.set(k, s); }
+        if (!s) { s = { item: r.item, loc: r.loc, lot: r.lot, qty: 0, value: 0, rolls: 0, bag: null }; m.set(k, s); }
         s.qty += r.qin - r.qout; s.value += r.value; s.rolls += r.rolls;
+        if (r.rollMoves) { s.bag = s.bag || new Map(); for (const [no, kg] of r.rollMoves) s.bag.set(no, r3((s.bag.get(no) || 0) + kg)); }
       }
-      return [...m.values()];
+      // Weighed rolls still there (kg left on each), in roll order; they count towards the rolls too.
+      return [...m.values()].map(s => {
+        s.weights = s.bag ? [...s.bag].filter(([, kg]) => kg > 0.0005).sort((a, b) => a[0] - b[0]).map(([no, kg]) => ({ no, kg })) : [];
+        s.rolls += s.weights.length;
+        delete s.bag;
+        return s;
+      });
     },
   };
   const reports = buildReports(ctx);

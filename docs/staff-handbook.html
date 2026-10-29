@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Majumdaar Hosiery ERP - Staff Handbook</title>
+<style>
+@page { size: A4; margin: 14mm 14mm 16mm; }
+* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+:root { --ink: #1b2230; --ink2: #3d4555; --muted: #667085; --line: #e1e5eb; --accent: #1f2f6b; --soft: #eef1f9; --soft2: #f6f7fa; --ok: #1d7a4e; --okbg: #e6f4ec; --warn: #8a5a00; --warnbg: #fff4dc;
+  --yarn: #c9930f; --knit: #2f8f58; --move: #2f6fc8; --dye: #bd4a83; --fin: #178a7d; }
+body { margin: 0; color: var(--ink); font: 12.6px/1.5 "Segoe UI", Arial, Helvetica, sans-serif; }
+h1, h2, h3 { margin: 0; color: var(--ink); line-height: 1.2; }
+p { margin: 0 0 8px; }
+b { font-weight: 600; }
+code { font-family: Consolas, "Courier New", monospace; font-size: 11.5px; background: var(--soft2); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+.mono { font-family: Consolas, "Courier New", monospace; }
+
+/* cover */
+.cover { height: 265mm; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; }
+.cover .top { border-bottom: 3px solid var(--accent); padding-bottom: 18px; }
+.badge { width: 58px; height: 58px; border-radius: 13px; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 22px; margin-bottom: 26px; }
+.cover h1 { font-size: 38px; letter-spacing: -.01em; }
+.cover .sub { font-size: 17px; color: var(--accent); margin-top: 6px; font-weight: 600; }
+.cover .lead { font-size: 14px; color: var(--ink2); margin-top: 16px; max-width: 150mm; }
+.toc { background: var(--soft); border-radius: 12px; padding: 18px 22px; }
+.toc h3 { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); margin-bottom: 10px; }
+.toc ol { margin: 0; padding-left: 18px; columns: 2; column-gap: 28px; }
+.toc li { margin: 3px 0; break-inside: avoid; }
+.toc li span { color: var(--muted); }
+.cover .foot { color: var(--muted); font-size: 11.5px; display: flex; justify-content: space-between; }
+
+/* parts and sections */
+.part { page-break-before: always; }
+.part-head { background: var(--accent); color: #fff; border-radius: 12px; padding: 16px 20px; margin-bottom: 16px; }
+.part-head .k { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; opacity: .85; }
+.part-head h1 { color: #fff; font-size: 24px; margin-top: 2px; }
+.part-head p { margin: 6px 0 0; opacity: .9; max-width: 160mm; }
+h2 { font-size: 17px; margin: 18px 0 8px; display: flex; align-items: baseline; gap: 10px; }
+h2 .n { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 6px; border-radius: 7px; background: var(--accent); color: #fff; font-size: 13px; }
+h3 { font-size: 13px; margin: 10px 0 5px; }
+.sec { break-inside: auto; }
+h2, h3, .where, .what { break-after: avoid; page-break-after: avoid; }
+table { break-inside: auto; } thead, tr:first-child { break-after: avoid; }
+.what { color: var(--ink2); }
+.where { display: inline-block; background: var(--soft); border-radius: 6px; padding: 2px 9px; font-weight: 600; color: var(--accent); margin: 2px 0 8px; }
+table { border-collapse: collapse; width: 100%; margin: 4px 0 10px; font-size: 12px; }
+th { background: var(--soft); text-align: left; font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--accent); padding: 6px 8px; font-weight: 700; }
+td { padding: 5px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr { break-inside: avoid; }
+td.ex { color: var(--ink2); font-style: italic; }
+.note { background: var(--warnbg); border-left: 4px solid #e0a72a; border-radius: 6px; padding: 8px 12px; margin: 8px 0 12px; break-inside: avoid; }
+.note b:first-child { color: var(--warn); }
+.tip { background: var(--okbg); border-left: 4px solid var(--ok); border-radius: 6px; padding: 8px 12px; margin: 8px 0 12px; break-inside: avoid; }
+.tip b:first-child { color: var(--ok); }
+ol.order { margin: 4px 0 10px; padding-left: 20px; }
+ol.order li { margin: 2px 0; }
+
+/* flow */
+.flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0 14px; break-inside: avoid; }
+.loc { border: 1px solid var(--line); border-top: 4px solid var(--c); border-radius: 9px; padding: 9px 10px; position: relative; background: #fff; }
+.loc:not(:last-child)::after { content: "→"; position: absolute; right: -11px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 14px; background: #fff; }
+.loc b { display: block; font-size: 12.5px; }
+.loc span { color: var(--muted); font-size: 11px; }
+
+/* steps */
+.step { border: 1px solid var(--line); border-left: 5px solid var(--c); border-radius: 10px; padding: 11px 14px 6px; margin: 0 0 12px; break-inside: avoid; }
+.step .sh { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.step h2 { margin: 0 0 4px; }
+.who { font-size: 11px; font-weight: 600; color: var(--c); background: var(--soft2); border: 1px solid var(--line); border-radius: 999px; padding: 1px 9px; white-space: nowrap; }
+.auto { margin: 2px 0 8px; }
+.auto li { margin: 1px 0; }
+.stock { background: var(--soft2); border-radius: 8px; padding: 7px 10px 2px; margin: 6px 0 8px; }
+.stock .cap { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-bottom: 2px; }
+.stock table { margin: 0 0 4px; }
+.stock td { border-bottom: 0; padding: 2px 8px 2px 0; }
+.stock td:first-child { width: 42%; color: var(--ink2); }
+.result { border: 2px solid var(--fin); background: #eaf6f4; border-radius: 10px; padding: 10px 14px; margin: 10px 0; break-inside: avoid; }
+.result b:first-child { color: var(--fin); }
+
+/* compact print rhythm */
+body { font-size: 12px; line-height: 1.42; }
+td { padding: 3.5px 7px; }
+th { padding: 5px 7px; }
+h2 { margin: 12px 0 6px; font-size: 16px; }
+.step { padding: 9px 12px 3px; margin-bottom: 9px; }
+.step h2 { margin-bottom: 2px; }
+.where { margin: 1px 0 5px; }
+.stock { padding: 5px 9px 1px; margin: 4px 0 6px; }
+.part-head { padding: 13px 18px; margin-bottom: 12px; }
+.note, .tip { padding: 6px 11px; margin: 6px 0 9px; }
+table { margin: 3px 0 8px; }
+
+/* step cards, stock boxes and result boxes never split across pages */
+.step, .stock, .result, .note, .tip, .flow { break-inside: avoid !important; page-break-inside: avoid !important; display: block; }
+.step table, .step tr, .stock table { break-inside: avoid !important; page-break-inside: avoid !important; }
+
+/* an inline-block is one solid piece for the printer: it moves to the next page whole */
+.step, .result { display: inline-block !important; width: 100%; vertical-align: top; }
+</style>
+</head>
+<body>
+
+<!-- ============================ COVER ============================ -->
+<section class="cover">
+  <div class="top">
+    <div class="badge">MH</div>
+    <h1>Majumdaar Hosiery ERP</h1>
+    <div class="sub">Staff Handbook</div>
+    <p class="lead">How to fill in the master lists, and how material moves through the ERP from buying yarn to finished rolls in the store, explained step by step with one real example.</p>
+  </div>
+  <div class="toc">
+    <h3>Contents</h3>
+    <ol>
+      <li><b>Masters</b>: what they are and the order to fill them</li>
+      <li>Units</li>
+      <li>Locations</li>
+      <li>Items <span>(materials and products)</span></li>
+      <li>Parties <span>(suppliers and customers)</span></li>
+      <li>Machines</li>
+      <li>Processes <span>(labour rates)</span></li>
+      <li>BOM / Recipes</li>
+      <li>Party Price List</li>
+      <li><b>Workflow</b>: yarn purchase to finished rolls, 7 steps</li>
+      <li>What the ERP shows you at the end</li>
+      <li>Selling the finished lot</li>
+      <li>Quick fixes for common messages</li>
+      <li>Who does what</li>
+    </ol>
+  </div>
+  <div class="foot"><span>For all staff using the ERP</span><span>Boxes marked * must be filled in</span></div>
+</section>
+
+<!-- ============================ PART 1: MASTERS ============================ -->
+<section class="part">
+  <div class="part-head">
+    <div class="k">Part 1</div>
+    <h1>Masters: the fixed lists</h1>
+    <p>Masters are the lists the ERP uses everywhere: your materials, your customers and suppliers, your machines. Fill them in once; after that every screen lets you pick from a list instead of typing, and rates, GST and labour fill in automatically.</p>
+  </div>
+
+  <div class="sec">
+    <h3>Fill them in this order (each one uses the ones before it)</h3>
+    <ol class="order">
+      <li><b>Units</b>: already filled (Kg, Nos, Roll…). Add only if you need a new one.</li>
+      <li><b>Locations</b>: the 4 main places are already there.</li>
+      <li><b>Items</b>: all your materials and products.</li>
+      <li><b>Parties</b>: suppliers and customers.</li>
+      <li><b>Machines</b>: knitting and dyeing machines.</li>
+      <li><b>Processes</b>: labour rates (3 are already there; set your real rates).</li>
+      <li><b>BOM / Recipes</b>: dye recipes and packing standards.</li>
+      <li><b>Party Price List</b> (under Sales): special prices for customers.</li>
+    </ol>
+    <div class="tip"><b>Who can fill Masters:</b> Admin, Management, Purchase, Sales and Data Entry logins. Factory logins (Knitting, Dyeing, Finishing, Store) can see the lists but cannot change them.</div>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">1</span>Units</h2>
+    <p class="what">How you count things. Already there: <b>Kg, Nos, Roll, Mtr, Ltr, Pcs, Box</b>.</p>
+    <div class="where">Masters → Units → + New unit</div>
+    <table>
+      <tr><th style="width:26%">Box</th><th>What to write</th><th style="width:22%">Example</th></tr>
+      <tr><td>Symbol *</td><td>Short form</td><td class="ex">Dz</td></tr>
+      <tr><td>Unit name</td><td>Full name</td><td class="ex">Dozen</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">2</span>Locations</h2>
+    <p class="what">The places where stock is kept. Stock is always counted <b>per place</b>, so the ERP knows how much yarn is in the store and how much is at the knitting unit.</p>
+    <table>
+      <tr><th style="width:30%">Already there (cannot be deleted)</th><th>What is kept there</th></tr>
+      <tr><td><b>Main Store</b></td><td>Yarn, dyes &amp; chemicals, packing material as received</td></tr>
+      <tr><td><b>Knitting Factory</b></td><td>Yarn issued for knitting, grey fabric just knitted</td></tr>
+      <tr><td><b>Color Factory</b></td><td>Grey fabric waiting to be dyed, dyed fabric waiting to be finished</td></tr>
+      <tr><td><b>Finished Goods Store</b></td><td>Packed rolls ready to sell</td></tr>
+    </table>
+    <p>Add a new location only for another godown, or an outside job worker who holds your material.</p>
+    <div class="where">Masters → Locations → + New location</div>
+    <table>
+      <tr><th style="width:26%">Box</th><th>What to write</th><th style="width:22%">Example</th></tr>
+      <tr><td>Location name *</td><td>The place</td><td class="ex">Howrah Godown</td></tr>
+      <tr><td>Type</td><td>Store, Factory or Job Worker</td><td class="ex">Store</td></tr>
+      <tr><td>Remarks</td><td>Anything useful</td><td class="ex">Extra yarn storage</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">3</span>Items: materials and products</h2>
+    <p class="what">Every material you buy, make or sell, from yarn and dyes to the finished rolls you sell.</p>
+    <div class="where">Masters → Items → + New item</div>
+    <table>
+      <tr><th style="width:24%">Box</th><th>What to write</th><th style="width:26%">Example</th></tr>
+      <tr><td>Item code</td><td>Your own short code (optional, but handy for searching)</td><td class="ex">Y30</td></tr>
+      <tr><td>Item name *</td><td>Full name, the way you say it</td><td class="ex">Cotton Yarn 30s Combed</td></tr>
+      <tr><td>Category *</td><td>What kind of material; see the next table. <b>Very important.</b></td><td class="ex">Yarn</td></tr>
+      <tr><td>Unit *</td><td>How you count it</td><td class="ex">Kg</td></tr>
+      <tr><td>HSN code</td><td>From the supplier's bill or your CA</td><td class="ex">5205</td></tr>
+      <tr><td>GST %</td><td>Its GST rate</td><td class="ex">5</td></tr>
+      <tr><td>Standard rate (₹)</td><td>Usual price. Fills in purchase orders (bought items) or invoices (products)</td><td class="ex">245</td></tr>
+      <tr><td>Re-order level</td><td>Optional. Shows a <b>Low</b> alert when stock falls below this</td><td class="ex">500</td></tr>
+      <tr><td>Description</td><td>Quality details, if any</td><td class="ex">100% cotton, combed</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h3>The category decides where the item shows up</h3>
+    <table>
+      <tr><th style="width:22%">Category</th><th style="width:38%">Put here</th><th>It appears in</th></tr>
+      <tr><td><b>Yarn</b></td><td>All yarns: cotton, lycra, silk…</td><td>Purchase, yarn issue, knitting</td></tr>
+      <tr><td><b>Dyes &amp; Chemicals</b></td><td>Dyes, soda ash, salt, softener</td><td>Purchase, dyeing, dye recipes</td></tr>
+      <tr><td><b>Packing Material</b></td><td>Poly bags, paper tubes, tape</td><td>Purchase, finishing &amp; packing, packing recipes</td></tr>
+      <tr><td><b>Others</b></td><td>Anything else you buy</td><td>Purchase</td></tr>
+      <tr><td><b>Grey Fabric</b></td><td>Fabric straight off the knitting machine</td><td>Knitting output, transfer, dyeing input</td></tr>
+      <tr><td><b>Colored Fabric</b></td><td>Fabric after dyeing</td><td>Dyeing output, finishing input</td></tr>
+      <tr><td><b>Finished Goods</b></td><td>Packed fabric you sell</td><td>Finishing output, sales order, challan, invoice</td></tr>
+    </table>
+    <div class="tip"><b>Create the whole chain for every product you make.</b> For example: Cotton Yarn 30s (<b>Yarn</b>) → Grey Single Jersey 30s (<b>Grey Fabric</b>) → Dyed Single Jersey 30s (<b>Colored Fabric</b>) → Finished Single Jersey 30s (<b>Finished Goods</b>).</div>
+    <div class="note"><b>Creating an item does not add stock.</b> Stock comes in through <b>Purchase → Goods Receipt (GRN)</b> when you buy, or <b>Inventory → Opening / Adjustment</b> for stock you already have.</div>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">4</span>Parties: suppliers and customers</h2>
+    <p class="what">Everyone you buy from or sell to.</p>
+    <div class="where">Masters → Parties → + New party &nbsp;(or Customers → Customer Master: same list)</div>
+    <table>
+      <tr><th style="width:24%">Box</th><th>What to write</th><th style="width:28%">Example</th></tr>
+      <tr><td>Party name *</td><td>Business name</td><td class="ex">Kolkata Garments Pvt Ltd</td></tr>
+      <tr><td>Type *</td><td><b>Supplier</b> (you buy from them) · <b>Customer</b> (you sell to them) · <b>Job Worker</b> (does work for you) · <b>Both</b></td><td class="ex">Customer</td></tr>
+      <tr><td>Contact person</td><td>Who you talk to</td><td class="ex">Mr. Sen</td></tr>
+      <tr><td>Phone / Email</td><td>Contact details</td><td class="ex">+91 98300 12345</td></tr>
+      <tr><td>State *</td><td>Pick from the list. <b>Decides the GST type</b></td><td class="ex">West Bengal</td></tr>
+      <tr><td>GSTIN</td><td>Their 15-character GST number; leave empty if unregistered</td><td class="ex">19AAACK4444D1Z4</td></tr>
+      <tr><td>City / Address</td><td>Printed on invoices and challans</td><td class="ex">Kolkata</td></tr>
+      <tr><td>Credit limit (₹)</td><td>Customers: the most they may owe you</td><td class="ex">5,00,000</td></tr>
+      <tr><td>Credit days</td><td>Customers: days they get to pay</td><td class="ex">30</td></tr>
+      <tr><td>Opening balance (₹)</td><td>What was owed when you started using the ERP</td><td class="ex">25,000</td></tr>
+      <tr><td>Dr / Cr</td><td><b>Dr</b> = they owe you · <b>Cr</b> = you owe them</td><td class="ex">Dr</td></tr>
+    </table>
+    <div class="tip"><b>Why State and GSTIN matter:</b> same state as you → the invoice charges <b>CGST + SGST</b>; another state → <b>IGST</b>. The first two digits of a GSTIN must match the state code (West Bengal = 19); the ERP warns you if they don't. When an invoice would take a customer above their <b>credit limit</b>, the ERP asks you to confirm before saving.</div>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">5</span>Machines</h2>
+    <p class="what">Your knitting and dyeing machines. Picking a machine in a knitting entry lets the ERP show <b>output per machine</b>.</p>
+    <div class="where">Masters → Machines → + New machine</div>
+    <table>
+      <tr><th style="width:24%">Box</th><th>What to write</th><th style="width:28%">Example</th></tr>
+      <tr><td>Machine code *</td><td>Your own number</td><td class="ex">KM-01</td></tr>
+      <tr><td>Description</td><td>What it is</td><td class="ex">Single Jersey 30" 24G</td></tr>
+      <tr><td>Used for</td><td>Knitting, Dyeing, Finishing or Other</td><td class="ex">Knitting</td></tr>
+      <tr><td>Diameter / Gauge</td><td>Machine dia and needle gauge</td><td class="ex">30" / 24G</td></tr>
+      <tr><td>Feeders</td><td>Number of feeders</td><td class="ex">90</td></tr>
+      <tr><td>Capacity</td><td>Output per day or per batch</td><td class="ex">350 kg/day</td></tr>
+      <tr><td>Status</td><td>Running, Idle or Under maintenance</td><td class="ex">Running</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">6</span>Processes: labour rates</h2>
+    <p class="what">The labour rate you pay per kg for each stage. The ERP uses it to <b>calculate labour automatically</b>, and that labour goes into your <b>cost per kg</b>. Already there: Knitting ₹8/kg, Dyeing ₹15/kg, Finishing &amp; Packing ₹6/kg. <b>Change these to your real rates.</b></p>
+    <div class="where">Masters → Processes</div>
+    <table>
+      <tr><th style="width:24%">Box</th><th>What to write</th><th style="width:28%">Example</th></tr>
+      <tr><td>Process name *</td><td>Name</td><td class="ex">Knitting</td></tr>
+      <tr><td>Stage *</td><td>Knitting, Dyeing or Finishing</td><td class="ex">Knitting</td></tr>
+      <tr><td>Labour rate (₹/kg)</td><td>What you pay per kg</td><td class="ex">8</td></tr>
+    </table>
+    <table>
+      <tr><th style="width:24%">Stage</th><th>Labour is worked out as</th></tr>
+      <tr><td>Knitting</td><td>rate × <b>kg of grey fabric produced</b></td></tr>
+      <tr><td>Dyeing</td><td>rate × <b>kg of grey fabric put in</b></td></tr>
+      <tr><td>Finishing</td><td>rate × <b>kg of finished fabric</b></td></tr>
+    </table>
+    <p>You can always change the labour amount in a particular entry, for example to a fixed lump sum.</p>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">7</span>BOM / Recipes</h2>
+    <p class="what">A standard list of materials <b>for 1 kg of fabric</b>. Picking a recipe in a dyeing or finishing entry fills in all the dyes, chemicals or packing for you, multiplied by the kg.</p>
+    <div class="where">Masters → BOM / Recipes → + New recipe</div>
+    <table>
+      <tr><th style="width:24%">Box</th><th>What to write</th><th style="width:28%">Example</th></tr>
+      <tr><td>Recipe name *</td><td>A name you'll recognise</td><td class="ex">Red Reactive Recipe</td></tr>
+      <tr><td>Stage *</td><td><b>Dyeing</b> (dye recipes) or <b>Finishing</b> (packing standard)</td><td class="ex">Dyeing</td></tr>
+      <tr><td>For output item</td><td>The fabric it produces (optional)</td><td class="ex">Dyed Single Jersey 30s</td></tr>
+      <tr><td>Expected wastage %</td><td>Normal loss, for reference</td><td class="ex">3</td></tr>
+      <tr><td>Materials per 1 kg</td><td>One line per material, with the quantity for <b>1 kg</b> of fabric</td><td class="ex">see below</td></tr>
+    </table>
+    <table>
+      <tr><th>Example dye recipe: item</th><th style="width:24%">Qty per 1 kg</th><th style="width:30%">For 585 kg the ERP fills in</th></tr>
+      <tr><td>Reactive Red ME4BL</td><td>0.03</td><td>17.55 kg</td></tr>
+      <tr><td>Soda Ash</td><td>0.1</td><td>58.5 kg</td></tr>
+      <tr><td>Glauber Salt</td><td>0.5</td><td>292.5 kg</td></tr>
+      <tr><td>Silicone Softener</td><td>0.02</td><td>11.7 kg</td></tr>
+    </table>
+    <div class="note"><b>Only these appear in recipes:</b> Dyes &amp; Chemicals, Packing Material and Others. Yarn is entered directly in each knitting entry.</div>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">8</span>Party Price List</h2>
+    <p class="what">Special prices for particular customers. When you make a sales order or invoice for that customer, <b>their rate fills in automatically</b>.</p>
+    <div class="where">Sales → Party Price List → + New price</div>
+    <table>
+      <tr><th style="width:24%">Box</th><th>What to write</th><th style="width:28%">Example</th></tr>
+      <tr><td>Customer *</td><td>Pick the customer</td><td class="ex">Kolkata Garments Pvt Ltd</td></tr>
+      <tr><td>Item *</td><td>A Finished Goods item</td><td class="ex">Finished Single Jersey 30s</td></tr>
+      <tr><td>Rate (₹/kg) *</td><td>Their price</td><td class="ex">420</td></tr>
+      <tr><td>Effective from</td><td>Date the price starts</td><td class="ex">01-10-2026</td></tr>
+    </table>
+    <p>When a price changes, <b>add a new line with the new date</b>; the ERP always uses the latest. Customers without a special price get the item's standard rate.</p>
+  </div>
+
+  <div class="sec">
+    <h3>Good to know</h3>
+    <ul>
+      <li><b>No duplicates.</b> Two items, parties or machines cannot have the same name; the ERP tells you if one exists.</li>
+      <li><b>Used records cannot be deleted.</b> Once an item or party is used in an entry it is protected. You can still <b>edit</b> it (spelling, phone number…).</li>
+      <li><b>Changes apply going forward.</b> A new rate, GST % or labour rate affects new entries; saved entries keep their values.</li>
+      <li><b>Search and sort:</b> every list has a search box; click a column heading to sort.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================ PART 2: WORKFLOW ============================ -->
+<section class="part">
+  <div class="part-head">
+    <div class="k">Part 2</div>
+    <h1>From yarn purchase to finished rolls</h1>
+    <p>One real example all the way through: you buy <b>1,000 kg</b> of Cotton Yarn 30s, knit <b>600 kg</b> of it, dye it <b>Red</b>, and end up with <b>560 kg / 24 rolls</b> of finished fabric.</p>
+  </div>
+
+  <div class="sec">
+    <h3>The material moves through four places, one entry at a time</h3>
+    <div class="flow">
+      <div class="loc" style="--c: var(--yarn)"><b>Main Store</b><span>yarn, dyes, packing</span></div>
+      <div class="loc" style="--c: var(--knit)"><b>Knitting Factory</b><span>yarn → grey fabric</span></div>
+      <div class="loc" style="--c: var(--dye)"><b>Color Factory</b><span>grey → dyed fabric</span></div>
+      <div class="loc" style="--c: var(--fin)"><b>Finished Goods Store</b><span>finished rolls</span></div>
+    </div>
+    <table>
+      <tr><th style="width:6%">#</th><th style="width:32%">Step</th><th style="width:22%">Who does it</th><th>What happens</th></tr>
+      <tr><td>1</td><td>Purchase Order</td><td>Purchase</td><td>You order yarn from the supplier</td></tr>
+      <tr><td>2</td><td>Goods Receipt (GRN)</td><td>Store</td><td>Yarn arrives at the <b>Main Store</b> and gets its <b>lot number</b> (L-0001)</td></tr>
+      <tr><td>3</td><td>Purchase Bill</td><td>Purchase / Accounts</td><td>Supplier's bill recorded (money only)</td></tr>
+      <tr><td>4</td><td>Yarn Issue to Knitting</td><td>Store</td><td>Yarn sent to the <b>Knitting Factory</b></td></tr>
+      <tr><td>5</td><td>Knitting</td><td>Knitting</td><td>Yarn becomes <b>grey fabric</b> with the <b>same lot number</b>, and goes <b>straight to the Color Factory</b></td></tr>
+      <tr><td>6</td><td>Dyeing</td><td>Dyeing</td><td>Grey becomes <b>coloured fabric</b></td></tr>
+      <tr><td>7</td><td>Finishing &amp; Packing</td><td>Finishing</td><td>Coloured becomes <b>finished rolls</b> in the Finished Goods Store</td></tr>
+    </table>
+    <div class="note"><b>Golden rule:</b> each step can only use what the <b>previous step</b> put there. If a list says <b>"no stock here"</b>, the step before it has not been done yet.</div>
+    <div class="note"><b>One lot number, start to finish:</b> the ERP gives the lot number <b>once, on the GRN</b> (L-0001, L-0002 …). Nobody types it. Yarn issue, knitting, dyeing, finishing and the challan all pick that same number from a list, so lot L-0001 is the same lot from the supplier's yarn to the customer's invoice.</div>
+    <div class="tip"><b>Before you start:</b> the items in the example must exist in Masters → Items (Cotton Yarn 30s = Yarn, Grey Single Jersey 30s = Grey Fabric, Dyed Single Jersey 30s = Colored Fabric, Finished Single Jersey 30s = Finished Goods, plus your dyes, chemicals and packing). Add the supplier in Masters → Parties.</div>
+  </div>
+
+  <div class="step" style="--c: var(--yarn)">
+    <div class="sh"><h2><span class="n">1</span>Purchase Order</h2><span class="who">Purchase · optional but recommended</span></div>
+    <div class="where">Purchase → Purchase Orders → + New</div>
+    <table>
+      <tr><th style="width:32%">Box</th><th>Fill</th></tr>
+      <tr><td>Supplier</td><td>Shree Spinning Mills</td></tr>
+      <tr><td>Item line</td><td>Cotton Yarn 30s · Qty <b>1000</b>. Rate and GST fill in by themselves</td></tr>
+    </table>
+    <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Nothing moves yet</td><td>It is only an order</td></tr></table></div>
+  </div>
+
+  <div class="step" style="--c: var(--yarn)">
+    <div class="sh"><h2><span class="n">2</span>Goods Receipt (GRN): yarn arrives</h2><span class="who">Store</span></div>
+    <div class="where">Purchase → Goods Receipt (GRN) → + New</div>
+    <table>
+      <tr><th style="width:32%">Box</th><th>Fill</th></tr>
+      <tr><td>Supplier</td><td>Shree Spinning Mills</td></tr>
+      <tr><td>Against PO</td><td>Pick the PO. The lines fill in by themselves</td></tr>
+      <tr><td>Lot no</td><td>Nothing to type. It shows <i>new on save</i>, and the yarn gets <b>L-0001</b> when you save. Dyes, chemicals and packing show <i>no lot</i></td></tr>
+      <tr><td>Received at</td><td><b>Main Store</b></td></tr>
+      <tr><td>Supplier challan no</td><td>From their delivery paper</td></tr>
+    </table>
+    <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Main Store</td><td><b>1,000 kg</b> Cotton Yarn, lot <b>L-0001</b></td></tr></table></div>
+    <p>Buy your <b>dyes, chemicals and packing material</b> the same way (steps 1 and 2). They are needed in steps 6 and 7.</p>
+  </div>
+
+  <div class="step" style="--c: var(--yarn)">
+    <div class="sh"><h2><span class="n">3</span>Purchase Bill: money only</h2><span class="who">Purchase / Accounts</span></div>
+    <div class="where">Purchase → Purchase Bills → + New</div>
+    <p>Pick the supplier, type their <b>bill number</b> and choose <b>Against GRN</b>. Lines and GST fill in by themselves. This records what you <b>owe</b> the supplier; it does not move any stock.</p>
+  </div>
+
+  <div class="step" style="--c: var(--move)">
+    <div class="sh"><h2><span class="n">4</span>Yarn Issue to Knitting</h2><span class="who">Store</span></div>
+    <div class="where">Inventory → Yarn Issue to Knitting → + New</div>
+    <table>
+      <tr><th style="width:32%">Box</th><th>Fill</th></tr>
+      <tr><td>Item</td><td>Cotton Yarn 30s</td></tr>
+      <tr><td>Yarn lot</td><td><b>L-0001 — 1000 Kg</b> (the list shows what is in the Main Store)</td></tr>
+      <tr><td>Qty (kg)</td><td><b>600</b></td></tr>
+    </table>
+    <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Main Store</td><td>400 kg yarn</td></tr><tr><td>Knitting Factory</td><td><b>600 kg</b> yarn, lot L-0001</td></tr></table></div>
+  </div>
+
+  <div class="step" style="--c: var(--knit)">
+    <div class="sh"><h2><span class="n">5</span>Knitting: yarn becomes grey fabric</h2><span class="who">Knitting</span></div>
+    <div class="where">Production → Knitting → + New</div>
+    <table>
+      <tr><th style="width:32%">Box</th><th>Fill</th></tr>
+      <tr><td>Machine / Shift</td><td>KM-01 · Day</td></tr>
+      <tr><td>Yarn consumed</td><td>Cotton Yarn 30s · lot <b>L-0001</b> · <b>600 kg</b></td></tr>
+      <tr><td>Lot no</td><td>Fills in by itself from the yarn: <b>L-0001</b>. With two yarns (e.g. cotton + Lycra) it takes the lot of the one with the most kg</td></tr>
+      <tr><td>Grey fabric produced</td><td>Grey Single Jersey 30s</td></tr>
+      <tr><td>Output qty (kg) / Rolls</td><td><b>585</b> / <b>25</b></td></tr>
+      <tr><td>GSM / Dia</td><td>160 / 30" (optional)</td></tr>
+      <tr><td>Grey fabric goes to</td><td>Already set to <b>Color Factory (ready to dye)</b>. Leave it</td></tr>
+    </table>
+    <p><b>The ERP fills in by itself:</b></p>
+    <ul class="auto">
+      <li><b>Wastage</b> 600 − 585 = <b>15 kg</b> (2.5%). Change it if the real waste was different.</li>
+      <li><b>Labour</b> ₹8 × 585 kg = <b>₹4,680</b>.</li>
+    </ul>
+    <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Knitting Factory</td><td>Yarn used up (600 kg)</td></tr><tr><td>Color Factory</td><td><b>585 kg / 25 rolls</b> grey fabric, lot <b>L-0001</b>, ready to dye. <b>No transfer entry needed</b></td></tr></table></div>
+    <p class="note" style="margin-top:4px"><b>Holding fabric at the knitting unit?</b> Choose <b>Knitting Factory</b> in "Grey fabric goes to". Send it later with <b>Inventory → Transfer to Color Factory</b>.</p>
+  </div>
+
+  <div class="step" style="--c: var(--dye)">
+    <div class="sh"><h2><span class="n">6</span>Dyeing: grey becomes coloured</h2><span class="who">Dyeing</span></div>
+    <div class="where">Production → Dyeing / Coloring → + New</div>
+    <table>
+      <tr><th style="width:32%">Box</th><th>Fill</th></tr>
+      <tr><td>Grey fabric</td><td>Grey Single Jersey 30s</td></tr>
+      <tr><td>Lot no</td><td><b>L-0001</b>. Input qty fills in as <b>585</b></td></tr>
+      <tr><td>Color / Shade</td><td>Red</td></tr>
+      <tr><td>Dye recipe</td><td>Pick one (e.g. Red Reactive Recipe). Dyes &amp; chemicals fill in by themselves for 585 kg, taken from the <b>Main Store</b></td></tr>
+      <tr><td>Colored fabric produced</td><td>Dyed Single Jersey 30s</td></tr>
+      <tr><td>Output qty (kg)</td><td><b>570</b></td></tr>
+    </table>
+    <p><b>The ERP fills in by itself:</b> wastage <b>15 kg</b>, labour ₹15 × 585 = <b>₹8,775</b>.</p>
+    <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Color Factory</td><td><b>570 kg</b> dyed fabric, lot L-0001 (Red)</td></tr><tr><td>Main Store</td><td>Dyes &amp; chemicals reduced by what was used</td></tr></table></div>
+  </div>
+
+  <div class="step" style="--c: var(--fin)">
+    <div class="sh"><h2><span class="n">7</span>Finishing &amp; Packing: finished goods (roll / kg)</h2><span class="who">Finishing</span></div>
+    <div class="where">Production → Finishing &amp; Packing → + New</div>
+    <table>
+      <tr><th style="width:32%">Box</th><th>Fill</th></tr>
+      <tr><td>Colored fabric</td><td>Dyed Single Jersey 30s</td></tr>
+      <tr><td>Lot no</td><td><b>L-0001</b>. Input qty fills in as <b>570</b></td></tr>
+      <tr><td>Finish</td><td>Compacting (or your finish)</td></tr>
+      <tr><td>Packing materials</td><td>Poly bag <b>24</b>, paper tube <b>24</b> (or pick a packing recipe)</td></tr>
+      <tr><td>Finished goods produced</td><td>Finished Single Jersey 30s</td></tr>
+      <tr><td>Output qty (kg) / Rolls</td><td><b>560</b> / <b>24</b></td></tr>
+      <tr><td>Meters</td><td><b>2200</b> (optional; gives you cost per meter)</td></tr>
+      <tr><td>Quality</td><td>A</td></tr>
+    </table>
+    <p><b>The ERP fills in by itself:</b> wastage <b>10 kg</b>, labour ₹6 × 560 = <b>₹3,360</b>.</p>
+    <div class="stock"><div class="cap">Final stock</div><table><tr><td>Finished Goods Store</td><td><b>560 kg / 24 rolls</b> Finished Single Jersey, lot <b>L-0001</b>, ready to sell</td></tr></table></div>
+  </div>
+
+  <div class="result"><b>Done:</b> 600 kg of yarn has become <b>560 kg / 24 rolls</b> of finished fabric, lot <b>L-0001</b>. That is a <b>93.3% yield</b>, with 40 kg of wastage recorded across the three stages.</div>
+</section>
+
+<!-- ============================ PART 3 ============================ -->
+<section class="part">
+  <div class="part-head">
+    <div class="k">Part 3</div>
+    <h1>Results, selling and quick fixes</h1>
+    <p>Where to see what the lot cost and where it is, how to sell it, and what to do when the ERP shows a message.</p>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">A</span>What the ERP shows you at the end</h2>
+    <table>
+      <tr><th style="width:40%">Where to look</th><th>What you see</th></tr>
+      <tr><td><b>Inventory → Stock Summary</b> (Finished Goods Store)</td><td>560 kg / 24 rolls, lot L-0001, with its value</td></tr>
+      <tr><td><b>Costing → Lot Costing Sheet</b></td><td>The exact cost of lot L-0001: yarn + dyes + packing + all labour + overheads + wastage = <b>cost per kg, per roll, per meter</b></td></tr>
+      <tr><td><b>Production → Batch / Lot Tracking</b></td><td>Lot L-0001 from the supplier's GRN (1,000 kg received) → 600 kg yarn knitted → 585 grey → 570 dyed → 560 finished = <b>93.3% yield</b>, then kg sold and kg left</td></tr>
+      <tr><td><b>Wastage → Wastage Report</b></td><td>Knitting 15 kg, dyeing 15 kg, finishing 10 kg, with their value</td></tr>
+    </table>
+    <div class="tip"><b>For accurate costing</b> also enter each month's power bill, rent, maintenance and similar costs in <b>Costing → Overhead Entries</b>. The ERP spreads them over the kilograms finished that month.</div>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">B</span>Selling the finished lot</h2>
+    <table>
+      <tr><th style="width:6%">#</th><th style="width:34%">Screen</th><th>What to do</th></tr>
+      <tr><td>1</td><td><b>Sales → Sales Orders</b></td><td>Customer and quantity. The rate fills in from the Party Price List. The ERP warns you if the customer's credit limit would be crossed</td></tr>
+      <tr><td>2</td><td><b>Sales → Delivery Challans</b></td><td>Pick the sales order; pending quantity fills in. Choose lot <b>L-0001</b> and the rolls sent. Stock leaves the Finished Goods Store</td></tr>
+      <tr><td>3</td><td><b>Sales → Invoices</b></td><td>Pick the challan; everything fills in. GST is worked out automatically (CGST + SGST or IGST). Click <b>Print</b> for the tax invoice</td></tr>
+      <tr><td>4</td><td><b>Customers → Payment Receipts</b></td><td>When the customer pays: amount, mode (bank, UPI, cheque) and reference number</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">C</span>Quick fixes for common messages</h2>
+    <table>
+      <tr><th style="width:36%">You see</th><th style="width:30%">Why</th><th>Do this</th></tr>
+      <tr><td>"no stock here" in <b>Yarn Issue</b></td><td>The yarn was never received</td><td>Do the <b>GRN</b> (step 2), or Opening Stock</td></tr>
+      <tr><td>"no stock here" in <b>Knitting</b></td><td>Yarn not issued to the knitting factory</td><td>Do the <b>Yarn Issue</b> (step 4)</td></tr>
+      <tr><td>Lot missing in <b>Dyeing</b></td><td>The knitting entry is not saved yet, or "Grey fabric goes to" was set to Knitting Factory</td><td>Save the <b>Knitting</b> entry (step 5); for fabric held at the knitting unit use <b>Inventory → Transfer to Color Factory</b></td></tr>
+      <tr><td>Chemicals show "no stock" in Dyeing</td><td>Dyes and chemicals never received</td><td>Buy them with a <b>GRN</b> into the Main Store</td></tr>
+      <tr><td>Lot missing in <b>Finishing</b></td><td>The lot has not been dyed yet</td><td>Do the <b>Dyeing</b> entry (step 6)</td></tr>
+      <tr><td>An item is missing from a list</td><td>Wrong category in the item master</td><td><b>Masters → Items</b>: correct the category</td></tr>
+      <tr><td>"Not enough stock … short by …"</td><td>You entered more than is available</td><td>Check the quantity, or the step before</td></tr>
+      <tr><td>"No access"</td><td>Your login is not allowed on that screen</td><td>Ask the administrator to change your role</td></tr>
+      <tr><td>"Too many wrong passwords"</td><td>5 wrong passwords in a row</td><td>Wait 15 minutes, then sign in again</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">D</span>Who does what</h2>
+    <table>
+      <tr><th style="width:26%">Login</th><th>Works on</th></tr>
+      <tr><td><b>Purchase</b></td><td>Masters, purchase orders, purchase bills</td></tr>
+      <tr><td><b>Store / Inventory</b></td><td>Goods receipts (GRN), yarn issue to knitting, opening stock</td></tr>
+      <tr><td><b>Knitting</b></td><td>Knitting entries (the grey fabric goes to the Color Factory by itself)</td></tr>
+      <tr><td><b>Dyeing / Color</b></td><td>Dyeing entries</td></tr>
+      <tr><td><b>Finishing &amp; Packing</b></td><td>Finishing entries</td></tr>
+      <tr><td><b>Sales</b></td><td>Customers, price list, sales orders, challans, invoices</td></tr>
+      <tr><td><b>Finance &amp; Accounts</b></td><td>Purchase bills, supplier payments, customer receipts, overheads, reports</td></tr>
+      <tr><td><b>Management / Admin</b></td><td>Everything, including the business dashboard. Admin also manages users and settings</td></tr>
+    </table>
+    <div class="tip"><b>Saving:</b> press <b>Ctrl + S</b> or click <b>Save</b>. Your sign-in belongs to your own browser tab; close the tab or click the sign-out icon at the bottom of the menu when you leave the computer.</div>
+  </div>
+</section>
+
+</body>
+</html>

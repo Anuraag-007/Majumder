@@ -86,16 +86,43 @@ const API = {
   isAdmin: Sess.get('erp_admin') === '1',
   fresh: false,
   onAuthLost: null,
+  // The host stops the app when nobody has used it for a while and starts it again on the next
+  // request, so that request can be slow or, now and then, fail. A note appears after 1.5 s, reads
+  // are retried, and a 503 (the host answering for the app, so nothing was saved) is retried for
+  // saves too. Hosting cuts requests off at 120 s, so we stop waiting before that.
   async call(method, url, body) {
-    const res = await fetch(url, {
-      method,
-      headers: Object.assign({ 'Content-Type': 'application/json' }, API.token ? { Authorization: 'Bearer ' + API.token } : {}),
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    const done = Busy.start();
+    try { return await API.send(method, url, body); } finally { done(); }
+  },
+  async send(method, url, body) {
+    const read = method === 'GET';
+    const pause = n => new Promise(r => setTimeout(r, 1500 * n));
+    let res;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        res = await fetch(url, {
+          method,
+          headers: Object.assign({ 'Content-Type': 'application/json' }, API.token ? { Authorization: 'Bearer ' + API.token } : {}),
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: AbortSignal.timeout ? AbortSignal.timeout(read ? 60e3 : 110e3) : undefined,
+        });
+      } catch (e) {
+        if (read && attempt < 4) { await pause(attempt); continue; }
+        if (e && e.name === 'TimeoutError') throw new Error(read ? 'The server took too long to answer. Please try again.' : 'The server took too long to answer. Open the list to check whether it was saved before trying again.');
+        throw new Error(read ? 'Cannot reach the server. Check the internet connection and try again.' : 'Cannot reach the server. Open the list to check whether it was saved before trying again.');
+      }
+      if (attempt < 4 && (res.status === 503 || (read && (res.status === 502 || res.status === 504)))) { await pause(attempt); continue; }
+      break;
+    }
     let data = null;
     try { data = await res.json(); } catch (e) { data = null; }
     if (res.status === 401 && url !== '/api/login') { API.setSession('', null); if (API.onAuthLost) API.onAuthLost(); }
-    if (!res.ok) throw new Error((data && data.error) || ('Request failed (' + res.status + ')'));
+    if (!res.ok) {
+      const hostTrouble = res.status >= 502 && res.status <= 504;
+      throw new Error((data && data.error) || (!hostTrouble ? 'Request failed (' + res.status + ')'
+        : read ? 'The server is not answering right now (it may be starting up). Please try again in a moment.'
+          : 'The server did not answer properly. Open the list to check whether it was saved before trying again.'));
+    }
     return data;
   },
   get: url => API.call('GET', url),
@@ -110,6 +137,21 @@ const API = {
     } else Sess.clear();
   },
   report: (name, q) => API.get('/api/report/' + name + U.qs(q)),
+};
+
+/* ---------- "waiting for the server" note (shown while any request takes over 1.5 s) ---------- */
+const Busy = {
+  n: 0, el: null,
+  start() {
+    let shown = false;
+    const t = setTimeout(() => { shown = true; Busy.n++; Busy.paint(); }, 1500);
+    return () => { clearTimeout(t); if (shown) { Busy.n--; Busy.paint(); } };
+  },
+  paint() {
+    if (!Busy.el) Busy.el = h('div', { class: 'busy', role: 'status' }, h('span', { class: 'spin', 'aria-hidden': 'true' }), 'Waiting for the server… if nobody has used the ERP for a while it is starting up, which can take a few seconds.');
+    if (Busy.n > 0 && !Busy.el.isConnected) document.body.appendChild(Busy.el);
+    else if (Busy.n <= 0 && Busy.el.isConnected) Busy.el.remove();
+  },
 };
 
 /* ---------- record cache (masters + documents) ---------- */
@@ -239,6 +281,7 @@ const ICONS = {
   logout: 'M15 4h4a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-4M10 16l-4-4 4-4M6 12h10',
   chevron: 'M9 6l6 6-6 6',
   alert: 'M12 9v4M12 17h.01M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z',
+  info: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16v-5M12 8h.01',
   truck: 'M3 6h11v10H3zM14 10h4l3 3v3h-7M7 19a1.5 1.5 0 1 0 0-.01M17 19a1.5 1.5 0 1 0 0-.01',
   drop: 'M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z',
   roll: 'M4 7a3 3 0 1 0 6 0 3 3 0 1 0-6 0M7 4h12a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H7M7 10v8a3 3 0 0 0 0 0',

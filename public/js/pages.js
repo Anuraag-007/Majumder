@@ -50,6 +50,7 @@ const FILTERS = {
   customer: { p: 'party', label: 'Customer', type: 'ref', ref: 'parties', filter: p => S.partyIs(p, 'Customer') },
   party: { p: 'party', label: 'Party', type: 'ref', ref: 'parties' },
   stage: { p: 'stage', label: 'Stage', type: 'select', options: S.STAGES.map(s => [s, s]) },
+  process: { p: 'stage', label: 'Process', type: 'select', options: S.STAGES.map(s => [s, S.STAGE_LABELS[s]]) },
   stockGroup: { p: 'group', label: 'Show', type: 'select', options: [['lot', 'Lot-wise'], ['item', 'Item-wise']], noAll: true },
   groupBy: { p: 'groupBy', label: 'Group by', type: 'select', options: [['', 'Invoice lines'], ['party', 'Customer'], ['item', 'Item'], ['lot', 'Lot']], noAll: true },
   type: { p: 'type', label: 'Type', type: 'select', options: [['receivable', 'Receivables (customers)'], ['payable', 'Payables (suppliers)']], noAll: true },
@@ -63,7 +64,7 @@ function reportTable(t) {
   const numeric = c => ['money', 'qty', 'int', 'pct'].includes(c.type);
   const sums = cols.map(c => c.sum ? t.rows.reduce((s, r) => s + (+r[c.k] || 0), 0) : null);
   const cell = (c, v) => {
-    if (c.type === 'flag') return v ? h('span', { class: 'badge ' + (/over|overdue|below|short/i.test(v) ? 'bad' : /sold|closed/i.test(v) ? 'muted-b' : 'info') }, v) : '';
+    if (c.type === 'flag') return v ? h('span', { class: 'badge ' + (/over|overdue|below|short/i.test(v) ? 'bad' : /sold|closed|used up/i.test(v) ? 'muted-b' : 'info') }, v) : '';
     return U.fmt(c.type, v);
   };
   return h('div', { class: 'table-wrap' }, h('table', { class: 'data report' },
@@ -122,7 +123,10 @@ async function renderReport(main, name, query) {
       titleEl.textContent = r.title || def.title;
       noteEl.textContent = r.note || '';
       const tables = r.tables || [{ columns: r.columns, rows: r.rows }];
-      body.replaceChildren(...tables.map(t => h('section', { class: 'card flush' }, t.title ? h('h3', { class: 'pad' }, t.title) : null, t.columns.length ? reportTable(t) : h('p', { class: 'pad muted' }, r.note || 'Choose filters above.'))));
+      // Optional headline figures above the tables.
+      const cards = r.cards && r.cards.length ? h('div', { class: 'kpis' }, r.cards.map(c => h('div', { class: 'kpi' },
+        h('span', { class: 'kpi-label' }, c.label), h('span', { class: 'kpi-value' }, c.type === 'money' ? U.rupee(c.value) : U.fmt(c.type, c.value)), c.sub ? h('span', { class: 'kpi-sub' }, c.sub) : null))) : null;
+      body.replaceChildren(...[cards].concat(tables.map(t => h('section', { class: 'card flush' }, t.title ? h('h3', { class: 'pad' }, t.title) : null, t.columns.length ? reportTable(t) : h('p', { class: 'pad muted' }, r.note || 'Choose filters above.')))).filter(Boolean));
     } catch (e) { body.replaceChildren(h('div', { class: 'banner err' }, e.message)); }
   }
 
@@ -158,6 +162,7 @@ async function renderSettings(main) {
     if (type === 'textarea') ctl = h('textarea', { rows: 2, value: st[k] || '', disabled: !isAdmin, oninput: e => { st[k] = e.target.value; } });
     else if (type === 'select') ctl = h('select', { disabled: !isAdmin, onchange: e => { st[k] = e.target.value; } }, extra.map(([v, l]) => h('option', { value: v, selected: st[k] === v }, l)));
     else if (type === 'check') return h('div', { class: 'field w2 checkfield' }, h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!st[k], disabled: !isAdmin, onchange: e => { st[k] = e.target.checked; } }), ' ' + label));
+    else if (type === 'date') ctl = h('input', { type: 'date', value: st[k] || '', disabled: !isAdmin, onchange: e => { st[k] = e.target.value; } });
     else ctl = h('input', { type: 'text', value: st[k] || '', disabled: !isAdmin, oninput: e => { st[k] = e.target.value; } });
     return h('div', { class: 'field ' + (type === 'textarea' ? 'w4' : 'w2') }, h('span', { class: 'lbl' }, label), ctl);
   };
@@ -184,6 +189,9 @@ async function renderSettings(main) {
       h('div', { class: 'fields' },
         fld('valuation', 'Store stock valuation', 'select', [['AVG', 'Weighted average'], ['FIFO', 'FIFO (first in, first out)']]),
         fld('allowNegativeStock', 'Allow entries that make stock negative (not recommended)', 'check'))),
+    h('section', { class: 'card' }, h('h3', null, 'Labour payable'),
+      h('div', { class: 'fields' },
+        fld('labourFrom', 'Count labour payable from (labour and payments before this date are treated as settled)', 'date'))),
     isAdmin ? h('div', { class: 'actions end' }, h('button', { class: 'btn primary', onclick: async () => { try { await API.put('/api/settings', st); await Cache.getSettings(true); toast('Settings saved'); } catch (e) { toast(e.message, 'err'); } } }, 'Save settings')) : null,
     h('section', { class: 'card' }, h('h3', null, 'Change my password'),
       h('div', { class: 'fields' },

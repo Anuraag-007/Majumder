@@ -29,7 +29,7 @@ function displayValue(f, v) {
     return refLabel(f.ref, r);
   }
   if (f.type === 'check') return v ? 'Yes' : 'No';
-  if (f.type === 'select' && typeof f.options === 'function') { const o = f.options({}).find(x => Array.isArray(x) && x[0] === v); if (o) return o[1]; }
+  if (f.type === 'select' && f.options) { const o = (typeof f.options === 'function' ? f.options({}) : f.options).find(x => Array.isArray(x) && x[0] === v); if (o) return o[1]; }
   if (f.type === 'date') return U.fmtDate(v);
   if (f.fmt) return U.fmt(f.fmt, v);
   return String(v);
@@ -120,7 +120,7 @@ async function renderForm(main, key, id) {
   if (!s) return renderNotFound(main);
   const isNew = id === 'new';
   if (!Perm.can(s.area, isNew ? 'edit' : 'view')) return renderDenied(main);
-  await Promise.all([Cache.load(refsFor(s)), Cache.getSettings()]);
+  await Promise.all([Cache.load(refsFor(s).concat(Guide.needs(key))), Cache.getSettings()]);
   let doc;
   if (isNew) {
     doc = {};
@@ -131,10 +131,12 @@ async function renderForm(main, key, id) {
   } else {
     doc = JSON.parse(JSON.stringify(await API.get('/api/' + s.col + '/' + id)));
     doc._wastageQtyTouched = true; doc._labourTouched = true;
+    // entries saved before a field existed show what the ERP actually did with them
+    for (const f of s.fields) if (f.legacy !== undefined && isEmpty(doc[f.k])) doc[f.k] = f.legacy;
     for (const g of s.grids) if (!Array.isArray(doc[g.k]) || !doc[g.k].length) doc[g.k] = [{}];
   }
   const original = isNew ? null : JSON.parse(JSON.stringify(doc));
-  const hasLots = s.fields.some(f => f.type === 'lot') || s.grids.some(g => g.cols.some(c => c.type === 'lot'));
+  const hasLots = s.fields.some(f => f.type === 'lot') || s.grids.some(g => g.cols.some(c => c.type === 'lot')) || Guide.usesStock(key);
   const stock = new Map();
   if (hasLots) {
     const r = await API.report('stockChoices');
@@ -143,19 +145,79 @@ async function renderForm(main, key, id) {
     if (original) {
       const give = (loc, item, lot, qty) => { const k = loc + '|' + item; if (!stock.has(k)) stock.set(k, []); const arr = stock.get(k); const e = arr.find(x => x.lot === (lot || '')); if (e) e.qty = S.r3(e.qty + qty); else arr.push({ loc, item, lot: lot || '', qty }); };
       for (const f of s.fields) if (f.type === 'lot') give(f.loc(original), original[f.itemKey], original[f.k], S.num(original.inQty));
-      for (const g of s.grids) for (const c of g.cols) if (c.type === 'lot') for (const r of original[g.k] || []) give(c.loc(original, r), r.item, r.lot, S.num(r.qty));
+      for (const g of s.grids) for (const c of g.cols) if (c.type === 'lot') for (const r of original[g.k] || []) {
+        give(c.loc(original, r), r.item, r.lot, c.signed ? -S.num(r.qty) : S.num(r.qty)); // signed: + lines added stock, - lines took it
+        // ...and the rolls it took, so they can be picked again
+        const e = (r.rollPick || []).length ? stock.get(c.loc(original, r) + '|' + r.item).find(x => x.lot === (r.lot || '')) : null;
+        if (e) { e.bag = e.bag || []; for (const p of r.rollPick) { const b = e.bag.find(x => x.no === p.no); if (b) b.kg = S.r3(b.kg + p.kg); else e.bag.push({ no: p.no, kg: p.kg }); } }
+      }
     }
   }
 
   const form = h('div', { class: 'form' });
+  // Guidance panel: what is missing for this entry, where the stock is, and what comes next.
+  const guideEl = h('div', { class: 'guide', role: 'status', hidden: true });
+  let guideSig = '';
+  function renderGuide() {
+    const g = ctx.readOnly ? { notes: [], next: '' } : Guide.panel(s, doc, ctx);
+    const sig = JSON.stringify(g);
+    if (sig === guideSig) return;
+    guideSig = sig;
+    guideEl.hidden = !g.notes.length && !g.next;
+    guideEl.replaceChildren(
+      ...g.notes.map(n => h('div', { class: 'g-note ' + n.level }, icon(n.level === 'tip' ? 'info' : 'alert', 16), h('span', { class: 'g-text' }, n.text),
+        n.action ? (n.action.href ? h('a', { class: 'chip', href: n.action.href }, n.action.label) : h('span', { class: 'g-ask' }, 'Ask ' + n.action.ask)) : null)),
+      g.next ? h('p', { class: 'g-next' }, g.next) : null);
+  }
   const ctx = {
     s, doc, isNew, bindings: [], calcs: [],
+    stockRows() { return [].concat(...stock.values()); },
     available(loc, item, lot) { const e = (stock.get(loc + '|' + item) || []).find(x => x.lot === (lot || '')); return e ? e.qty : 0; },
     lots(loc, item) { return stock.get(loc + '|' + item) || []; },
+    // Weighed rolls of a lot that can still be sent: [{ no, kg }] in roll order.
+    bag(loc, item, lot) { const e = (stock.get(loc + '|' + item) || []).find(x => x.lot === (lot || '')); return e && e.bag ? e.bag.filter(r => r.kg > 0.0005).sort((a, b) => a.no - b.no) : []; },
+    // When the lot or kg of a line changes, take its weighed rolls in roll order (whole rolls, last one cut).
+    autoRolls(row, loc) {
+      const bag = ctx.bag(loc, row.item, row.lot);
+      const sig = row.item + '|' + row.lot + '|' + S.num(row.qty);
+      if (!bag.length) { delete row.rollPick; return; }
+      if (row._rollSig === sig && row.rollPick) return;
+      const a = S.allocRolls(bag, S.num(row.qty));
+      row._rollSig = sig;
+      // More kg than the rolls hold: pick nothing, so saving reports the shortage plainly.
+      if (a.short) { delete row.rollPick; row.rolls = ''; return; }
+      row.rollPick = a.picks; row.rolls = a.picks.length;
+    },
+    async pickRolls(row, loc) {
+      const bag = ctx.bag(loc, row.item, row.lot);
+      const cur = new Map((row.rollPick || []).map(p => [p.no, p.kg]));
+      const inputs = [];
+      const total = h('b');
+      const upd = () => { const t = inputs.filter(x => S.num(x.inp.value) > 0); total.textContent = U.qty(t.reduce((a, x) => a + Math.min(S.num(x.inp.value), x.r.kg), 0)) + ' kg in ' + t.length + ' roll' + (t.length === 1 ? '' : 's'); };
+      const rows = bag.map(r => {
+        const cb = h('input', { type: 'checkbox', checked: cur.has(r.no), 'aria-label': 'Send roll ' + r.no });
+        const inp = h('input', { type: 'number', step: 'any', min: 0, max: r.kg, class: 'num', 'aria-label': 'Kg to send from roll ' + r.no, value: cur.has(r.no) ? cur.get(r.no) : '' });
+        cb.onchange = () => { inp.value = cb.checked ? r.kg : ''; upd(); };
+        inp.oninput = () => { cb.checked = S.num(inp.value) > 0; upd(); };
+        inputs.push({ r, inp });
+        return h('tr', null, h('td', null, h('label', { class: 'check' }, cb, ' Roll ' + r.no)), h('td', { class: 'num' }, U.qty(r.kg)), h('td', null, inp));
+      });
+      upd();
+      const body = h('div', null,
+        h('p', { class: 'muted' }, 'Tick whole rolls, or type fewer kg to cut a roll. What is left of a cut roll stays in stock.'),
+        h('table', { class: 'data roll-pick' }, h('thead', null, h('tr', null, h('th', null, 'Roll'), h('th', { class: 'num' }, 'Kg on roll'), h('th', { class: 'num' }, 'Kg to send'))), h('tbody', null, rows)),
+        h('p', null, 'Sending: ', total));
+      if (!(await modal('Choose rolls · lot ' + row.lot, body, [{ label: 'Cancel', value: false }, { label: 'Use these rolls', value: true, primary: true }]))) return;
+      const picks = inputs.map(x => ({ no: x.r.no, kg: S.r3(Math.min(S.num(x.inp.value), x.r.kg)) })).filter(p => p.kg > 0);
+      row.rollPick = picks; row.rolls = picks.length; row.qty = S.r3(picks.reduce((a, p) => a + p.kg, 0));
+      row._rollSig = row.item + '|' + row.lot + '|' + S.num(row.qty);
+      ctx.rerender();
+    },
     refresh() {
       if (s.recalc) s.recalc(doc);
       for (const b of ctx.bindings) if (b.el !== document.activeElement && b.el.isConnected) { const v = b.obj[b.k]; const nv = isEmpty(v) ? '' : String(v); if (b.el.value !== nv) b.el.value = nv; }
-      for (const c of ctx.calcs) if (c.el.isConnected) c.el.textContent = c.fn();
+      for (const c of ctx.calcs) if (c.el.isConnected || !form.isConnected) c.el.textContent = c.fn(); // first fill runs before the form is on the page
+      renderGuide();
     },
     rerender() {
       const active = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.path : null;
@@ -180,14 +242,20 @@ async function renderForm(main, key, id) {
       } catch (e) { doc._balText = ''; }
       ctx.refresh();
     },
+    // Screens with an `info` function show a figure from the server (e.g. labour still payable).
+    async loadInfo() {
+      if (!s.info) return;
+      try { doc._infoText = await s.info(doc); } catch (e) { doc._infoText = ''; }
+      ctx.refresh();
+    },
   };
 
   function fieldControl(f, obj, row, grid, path) {
     const get = () => obj[f.k];
-    const afterInput = () => { if (f.onInput) f.onInput(doc, row, ctx); if (grid && grid.onEdit) grid.onEdit(doc, row); ctx.refresh(); };
+    const afterInput = () => { if (f.onInput) f.onInput(doc, row, ctx); if (grid && grid.onEdit) grid.onEdit(doc, row, ctx); ctx.refresh(); };
     const afterChange = () => {
       if (f.onChange) { if (row) f.onChange(row, doc, ctx); else f.onChange(doc, ctx); }
-      if (grid && grid.onEdit) grid.onEdit(doc, row);
+      if (grid && grid.onEdit) grid.onEdit(doc, row, ctx);
       ctx.rerender();
     };
     const bind = el => { ctx.bindings.push({ el, obj, k: f.k }); el.dataset.path = path; return el; };
@@ -247,10 +315,25 @@ async function renderForm(main, key, id) {
         const opts = item ? ctx.lots(loc, item).filter(x => x.qty > 0.0005 || x.lot === cur) : [];
         if (cur && !opts.some(x => x.lot === cur)) opts.unshift({ lot: cur, qty: 0 });
         const u = unitOf(item);
+        const blank = item && f.blank ? f.blank(obj) : null; // what an empty choice means here, e.g. "new lot (auto)"
         return bind(h('select', { 'aria-label': label, onchange: e => { obj[f.k] = e.target.value; afterChange(); } },
-          h('option', { value: '' }, !item ? 'pick item first' : opts.length ? (opts.some(x => x.lot === '') ? '— no lot —' : '— select lot —') : 'no stock here'),
-          opts.filter(x => x.lot !== '').map(x => h('option', { value: x.lot, selected: x.lot === cur }, x.lot + ' — ' + U.qty(x.qty) + ' ' + u)),
+          h('option', { value: '' }, !item ? 'pick item first' : blank || (opts.length ? (opts.some(x => x.lot === '') ? '— no lot —' : '— select lot —') : 'no stock here')),
+          opts.filter(x => x.lot !== '').map(x => h('option', { value: x.lot, selected: x.lot === cur }, x.lot + ' — ' + U.qty(x.qty) + ' ' + u + (x.bag ? ' · ' + x.bag.length + ' roll' + (x.bag.length === 1 ? '' : 's') : ''))),
           opts.filter(x => x.lot === '').map(x => h('option', { value: '', selected: cur === '' }, '(no lot) — ' + U.qty(x.qty) + ' ' + u))));
+      }
+      case 'rolls': {
+        // Lots weighed roll by roll show the rolls taken on a button that opens the roll picker;
+        // other lots keep a plain "number of rolls" box.
+        const loc = f.loc(doc, row);
+        if (!ctx.bag(loc, row.item, row.lot).length && !(row.rollPick || []).length) return fieldControl(Object.assign({}, f, { type: 'number' }), obj, row, grid, path);
+        const locked = !!(f.locked && f.locked(doc));
+        const b = h('button', { type: 'button', class: 'btn small roll-btn', disabled: locked, title: locked ? 'Rolls sent with the challan' : 'Choose which rolls go out', onclick: () => ctx.pickRolls(row, loc) });
+        ctx.calcs.push({ el: b, fn: () => {
+          const p = row.rollPick || [];
+          if (p.length) b.title = p.length + ' roll' + (p.length === 1 ? '' : 's') + ': ' + p.map(x => 'roll ' + x.no + ' = ' + x.kg + ' kg').join(', ') + (locked ? '' : '. Click to change.');
+          return p.length ? p.length + ' · ' + S.fmtRolls(p) : 'Choose rolls';
+        } });
+        return b;
       }
       case 'password':
         return bind(h('input', { type: 'password', autocomplete: 'new-password', 'aria-label': label, value: get() || '', oninput: e => { obj[f.k] = e.target.value; } }));
@@ -269,13 +352,22 @@ async function renderForm(main, key, id) {
   function gridBlock(g) {
     const rows = doc[g.k];
     const sumCols = g.totals || [];
+    // Lines that take stock get a note underneath when the stock is missing or short.
+    const lotCol = g.cols.find(c => c.type === 'lot');
+    const hintRow = r => {
+      const msg = h('div', { class: 'line-hint' });
+      const tr = h('tr', { class: 'hint-row', hidden: true }, h('td'), h('td', { colspan: g.cols.length + 1 }, msg));
+      ctx.calcs.push({ el: msg, fn: () => { const x = ctx.readOnly ? null : Guide.lineHint(s, lotCol, r, doc, ctx); tr.hidden = !x; return x ? x.text : ''; } });
+      return tr;
+    };
     return h('div', { class: 'grid-wrap' },
       h('table', { class: 'grid' },
         h('thead', null, h('tr', null, h('th', { class: 'idx' }, '#'), g.cols.map(c => h('th', { class: (c.wide ? 'wide ' : '') + (c.narrow ? 'narrow ' : '') + (c.fmt && c.fmt !== 'pct' ? 'num' : '') }, c.label, c.req ? h('b', { class: 'req', 'aria-hidden': 'true' }, ' *') : null)), h('th', { class: 'idx' }, h('span', { class: 'sr' }, 'Remove')))),
-        h('tbody', null, rows.map((r, i) => h('tr', null,
+        h('tbody', null, rows.map((r, i) => [h('tr', null,
           h('td', { class: 'idx' }, i + 1),
           g.cols.map(c => h('td', { class: c.type === 'calc' ? 'calc-cell' : '' }, fieldControl(c, r, r, g, g.k + '.' + i + '.' + c.k))),
-          h('td', { class: 'idx' }, h('button', { class: 'icon-btn', type: 'button', title: 'Remove line', 'aria-label': 'Remove line ' + (i + 1), onclick: () => { rows.splice(i, 1); if (!rows.length) rows.push({}); if (g.onEdit) g.onEdit(doc); ctx.rerender(); } }, icon('x', 14)))))),
+          h('td', { class: 'idx' }, h('button', { class: 'icon-btn', type: 'button', title: 'Remove line', 'aria-label': 'Remove line ' + (i + 1), onclick: () => { rows.splice(i, 1); if (!rows.length) rows.push({}); if (g.onEdit) g.onEdit(doc); ctx.rerender(); } }, icon('x', 14)))),
+          lotCol ? hintRow(r) : null])),
         sumCols.length ? h('tfoot', null, h('tr', null, h('td'), g.cols.map(c => {
           if (!sumCols.includes(c.k)) return h('td');
           const el = h('td', { class: 'num strong' });
@@ -367,11 +459,13 @@ async function renderForm(main, key, id) {
       canEdit ? saveBtn : h('span', { class: 'badge muted-b' }, 'View only'),
     ]),
     !isNew && (doc.updatedAt || doc.createdAt) ? h('p', { class: 'meta' }, 'Created ' + U.fmtDate(doc.createdAt) + ' by ' + (doc.createdBy || '?') + (doc.updatedAt ? ' · last edited ' + U.fmtDate(doc.updatedAt) + ' by ' + doc.updatedBy : '')) : null,
+    guideEl,
     form,
   );
   form.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); save(false); } });
   ctx.rerender();
   if (doc.party && s.fields.some(f => f.k === '_bal')) ctx.loadBalance();
+  ctx.loadInfo();
   const first = form.querySelector('input:not([type=checkbox]), select, textarea');
   if (first && isNew) first.focus();
 }
@@ -443,12 +537,17 @@ async function printDoc(s, doc) {
     const desc = r => {
       const it = Cache.byId('items', r.item) || {};
       const sub = [isTax && it.hsn ? 'HSN ' + it.hsn : '', r.lot ? 'Lot ' + r.lot : '', it.code || ''].filter(Boolean).join(' · ');
-      return '<div class="iname">' + esc(it.name || '') + '</div>' + (sub ? '<div class="isub">' + esc(sub) + '</div>' : '');
+      const pick = r.rollPick || [];
+      const rollLine = pick.length ? pick.length + ' roll' + (pick.length === 1 ? '' : 's') + ': ' + S.fmtRolls(pick) + ' kg' : '';
+      return '<div class="iname">' + esc(it.name || '') + '</div>' + (sub ? '<div class="isub">' + esc(sub) + '</div>' : '') + (rollLine ? '<div class="isub">' + esc(rollLine) + '</div>' : '');
     };
+    // Total kg and rolls (bills show both units)
+    const sumOf = k => rows.reduce((t, r) => t + S.num(r[k]), 0);
+    const foot = rows.length > 1 && cols.some(c => c.k === 'qty') ? '<tfoot><tr><td></td><td>Total</td>' + cols.map(c => '<td class="n">' + (c.k === 'qty' ? U.qty(sumOf('qty')) : c.k === 'rolls' ? U.int(sumOf('rolls')) : '') + '</td>').join('') + '</tr></tfoot>' : '';
     return (s.grids.length > 1 || !isTax ? '<h4>' + esc(g.title) + '</h4>' : '') +
       '<table class="items"><thead><tr><th class="c">#</th><th>Description</th>' + cols.map(c => '<th' + (numeric(c) ? ' class="n"' : '') + '>' + esc(c.label.replace(/ \(.*\)$/, '')) + '</th>').join('') + '</tr></thead><tbody>' +
       rows.map((r, i) => '<tr><td class="c">' + (i + 1) + '</td><td>' + desc(r) + '</td>' + cols.map(c => '<td' + (numeric(c) ? ' class="n"' : '') + '>' + cell(c, r) + '</td>').join('') + '</tr>').join('') +
-      '</tbody></table>';
+      '</tbody>' + foot + '</table>';
   }).join('');
 
   // ---- bottom: words / HSN / bank on the left, totals on the right
@@ -522,6 +621,7 @@ async function printDoc(s, doc) {
     .items thead th { background: var(--accent); color: #fff; font-size: 10px; letter-spacing: .06em; text-transform: uppercase; font-weight: 600; padding: 7px 8px; text-align: left; }
     .items thead th:first-child { border-radius: 6px 0 0 6px; } .items thead th:last-child { border-radius: 0 6px 6px 0; }
     .items td { padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .items tfoot td { font-weight: 700; border-bottom: 0; border-top: 1.5px solid var(--ink); }
     .items tbody tr:nth-child(even) td { background: #fafbfd; }
     .iname { font-weight: 600; }
     .isub { color: var(--muted); font-size: 10.5px; margin-top: 1px; }
@@ -572,7 +672,8 @@ async function printDoc(s, doc) {
     (left || right ? '<div class="bottom"><div class="left">' + left + '</div><div>' + right + '</div></div>' : '') +
     (notes ? '<div class="notes">' + notes + '</div>' : '') +
     '<footer><div class="terms">' + (isInvoice && st.invoiceTerms ? '<b>Terms &amp; conditions</b><br>' + esc(st.invoiceTerms) : '') +
-    (s.col === 'deliveries' ? '<div class="recv"><div>Received the above goods in good condition.</div><div class="line">Receiver&#39;s signature &amp; stamp</div></div>' : '') + '</div>' +
+    (s.col === 'deliveries' ? '<div class="recv"><div>Received the above goods in good condition.</div><div class="line">Receiver&#39;s signature &amp; stamp</div></div>' : '') +
+    (s.col === 'labourPayments' ? '<div class="recv"><div>Received the above amount.</div><div class="line">Receiver&#39;s signature</div></div>' : '') + '</div>' +
     '<div class="sign"><div class="for">For ' + esc(st.companyName) + '</div><div class="line">Authorised signatory</div></div>' +
     '<div class="comp">This is a computer-generated document' + (isInvoice ? '. Thank you for your business.' : '.') + '</div></footer>' +
     '</div>' +

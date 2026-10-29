@@ -3,6 +3,33 @@
  * Majumdaar Hosiery ERP - HTTP server.
  * Zero dependencies: only Node's built-in modules. Start with `node server.js`.
  */
+/* ---------- startup log ----------
+ * Everything the server prints is also written to <data folder>/server.log (or ./server.log in the
+ * app folder if the data folder can't be used), so problems on managed hosting can be read in a
+ * file manager. Kept under ~1 MB. */
+(function startupLog() {
+  const fs = require('fs'), path = require('path');
+  const candidates = [process.env.DATA_DIR || path.join(__dirname, 'data'), __dirname];
+  let file = null;
+  for (const dir of candidates) {
+    try {
+      fs.mkdirSync(dir, { recursive: true });
+      const f = path.join(dir, 'server.log');
+      if (fs.existsSync(f) && fs.statSync(f).size > 1e6) fs.renameSync(f, f + '.old');
+      fs.appendFileSync(f, '');
+      file = f; break;
+    } catch (e) { /* try the next place */ }
+  }
+  if (!file) return;
+  const write = (lvl, args) => { try { fs.appendFileSync(file, new Date().toISOString() + ' ' + lvl + ' ' + args.map(a => a instanceof Error ? a.stack : typeof a === 'string' ? a : JSON.stringify(a)).join(' ') + String.fromCharCode(10)); } catch (e) { /* ignore */ } };
+  const log = console.log, err = console.error;
+  console.log = (...a) => { write('INFO ', a); log(...a); };
+  console.error = (...a) => { write('ERROR', a); err(...a); };
+  write('INFO ', ['--- starting: node ' + process.version + ', DATA_DIR=' + (process.env.DATA_DIR || '(default ./data)') + ', PORT=' + (process.env.PORT || '(default 3000)')]);
+  process.on('uncaughtException', e => { write('FATAL', ['Stopped by an error:', e]); err(e); process.exit(1); });
+  process.on('exit', code => { if (code) write('FATAL', ['Server stopped with exit code ' + code]); });
+})();
+
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -31,7 +58,7 @@ const COLS = {
   units: {}, items: {}, parties: {}, locations: {}, machines: {}, processes: {}, boms: {}, priceList: {},
   purchaseOrders: { prefix: 'PO' }, grn: { prefix: 'GRN' }, purchaseBills: { prefix: 'PB' }, payments: { prefix: 'PAY' },
   transfers: { prefix: 'TRF' }, stockAdjust: { prefix: 'ADJ' },
-  knitting: { prefix: 'KNT' }, dyeing: { prefix: 'DYE' }, finishing: { prefix: 'FIN' }, overheads: { prefix: 'OH' },
+  knitting: { prefix: 'KNT' }, dyeing: { prefix: 'DYE' }, finishing: { prefix: 'FIN' }, overheads: { prefix: 'OH' }, labourPayments: { prefix: 'LP' },
   salesOrders: { prefix: 'SO' }, deliveries: { prefix: 'DC' }, invoices: { prefix: 'INV' }, receipts: { prefix: 'RCT' },
   users: { admin: true }, roles: { admin: true },
 };
@@ -41,18 +68,38 @@ seed.ensureBase(db.data);
 db.save();
 
 /* ---------------- sessions ---------------- */
+// Kept in memory and in the database (db.sessions), so sign-ins survive a restart. The sliding
+// expiry is written back at most every 10 minutes, not on every request.
 const sessions = new Map();
 const SESSION_MS = 12 * 3600e3;
+const SESSION_SAVE_MS = 10 * 60e3;
+
+function startSession(userId) {
+  const token = crypto.randomBytes(24).toString('hex');
+  const s = { userId, exp: Date.now() + SESSION_MS };
+  db.sessions.set(token, s);
+  sessions.set(token, Object.assign(s, { savedExp: s.exp }));
+  return token;
+}
+function endSession(token) { sessions.delete(token); db.sessions.delete(token); }
 
 function currentUser(req) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : '';
-  const s = sessions.get(token);
-  if (!s || s.exp < Date.now()) { if (s) sessions.delete(token); return null; }
+  if (!token) return null;
+  let s = sessions.get(token);
+  if (!s) { s = db.sessions.get(token); if (s) sessions.set(token, Object.assign(s, { savedExp: s.exp })); }
+  if (!s || s.exp < Date.now()) { if (s) endSession(token); return null; }
   s.exp = Date.now() + SESSION_MS;
+  if (s.exp - s.savedExp > SESSION_SAVE_MS) { db.sessions.set(token, s); s.savedExp = s.exp; }
   const u = db.data.users.find(x => x.id === s.userId && x.active !== false);
   return u ? Object.assign({ token }, u) : null;
 }
+setInterval(() => {
+  const now = Date.now();
+  for (const [t, s] of sessions) if (s.exp < now) sessions.delete(t);
+  try { db.sessions.purge(now); } catch (e) { /* database busy: try again next hour */ }
+}, 60 * 60e3).unref();
 const publicUser = u => ({ id: u.id, username: u.username, name: u.name, role: u.role, department: u.department || '', active: u.active !== false, createdAt: u.createdAt });
 
 /* ---------------- permissions ---------------- */
@@ -118,7 +165,12 @@ function serveStatic(req, res, pathname) {
   if (!file.startsWith(PUBLIC)) return send(res, 403, { error: 'Forbidden' });
   fs.stat(file, (err, st) => {
     if (err || !st.isFile()) return send(res, 404, { error: 'Not found' });
-    res.writeHead(200, Object.assign({ 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache' }, SECURITY_HEADERS));
+    // "no-cache" + ETag: the browser keeps its copy and only asks whether it changed, so pages load
+    // without downloading every script again, and an update is still picked up straight away.
+    const etag = 'W/"' + st.size.toString(16) + '-' + Math.floor(st.mtimeMs).toString(16) + '"';
+    const headers = Object.assign({ 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream', 'Cache-Control': 'no-cache', ETag: etag }, SECURITY_HEADERS);
+    if (req.headers['if-none-match'] === etag) { res.writeHead(304, headers); return res.end(); }
+    res.writeHead(200, headers);
     fs.createReadStream(file).pipe(res);
   });
 }
@@ -140,13 +192,24 @@ function referencedBy(id, selfCol) {
 // Reject a change that would make any stock go negative (unless settings allow it).
 function checkStock(col, trialData) {
   if (!engine.STOCK_COLS.includes(col) || db.data.settings.allowNegativeStock) return;
-  const before = new Set(engine.compute(db.data).errors.map(e => e.key));
+  const before = new Set(engine.computed(db.data, db.version).errors.map(e => e.key));
   const fresh = engine.compute(trialData).errors.filter(e => !before.has(e.key));
   if (fresh.length) {
     const items = Object.fromEntries(db.data.items.map(i => [i.id, i.name]));
     const locs = Object.fromEntries(db.data.locations.map(l => [l.id, l.name]));
     const e = fresh[0];
-    throw fail(400, 'Not enough stock: ' + (items[e.item] || 'item') + (e.lot ? ' (lot ' + e.lot + ')' : '') + ' at ' + (locs[e.loc] || e.loc) + ' is short by ' + e.short + (e.docNo && e.date ? ' on ' + e.date : '') + '.');
+    if (e.roll) throw fail(400, 'Roll ' + e.roll + ' of lot ' + e.lot + ' (' + (items[e.item] || 'item') + ') at ' + (locs[e.loc] || e.loc) + (e.have ? ' has only ' + e.have + ' kg left' : ' is no longer in stock') + (e.date ? ' on ' + e.date : '') + '.');
+    // Say where the item is now and which step brings it here.
+    const have = {};
+    for (const k of engine.computed(db.data, db.version).keys.values()) {
+      if (k.item !== e.item) continue;
+      const q = k.layers.reduce((t, l) => t + l.qty, 0) - k.neg;
+      if (q > 0.0005) have[k.loc] = (have[k.loc] || 0) + q;
+    }
+    const it = db.data.items.find(i => i.id === e.item) || {};
+    const unit = (db.data.units.find(u => u.id === it.unit) || {}).code || '';
+    const hint = Shared.supplyHint(it.category, e.loc, have, locs, unit).text;
+    throw fail(400, 'Not enough stock: ' + (items[e.item] || 'item') + (e.lot ? ' (lot ' + e.lot + ')' : '') + ' at ' + (locs[e.loc] || e.loc) + ' is short by ' + e.short + (e.docNo && e.date ? ' on ' + e.date : '') + '. ' + hint);
   }
 }
 
@@ -203,6 +266,10 @@ async function api(req, res, url) {
   const method = req.method;
   const q = Object.fromEntries(url.searchParams.entries());
 
+  // Cheap address for an uptime monitor or cron job to call so the host does not put the app to sleep.
+  if (parts[0] === 'health') return send(res, 200, { ok: true });
+  db.refreshIfChanged();
+
   if (parts[0] === 'login' && method === 'POST') {
     const { username, password } = await readBody(req);
     const ip = clientIp(req);
@@ -213,15 +280,14 @@ async function api(req, res, url) {
     const u = db.data.users.find(x => String(x.username || '').trim().toLowerCase() === String(username || '').trim().toLowerCase());
     if (!u || u.active === false || !verifyPassword(password || '', u.salt, u.hash)) { loginFailed(keys); throw fail(401, 'Wrong username or password'); }
     attempts.delete(keys[0]);
-    const token = crypto.randomBytes(24).toString('hex');
-    sessions.set(token, { userId: u.id, exp: Date.now() + SESSION_MS });
+    const token = startSession(u.id);
     return send(res, 200, Object.assign({ token }, session(u)));
   }
 
   const user = currentUser(req);
   if (!user) throw fail(401, 'Please sign in');
 
-  if (parts[0] === 'logout') { sessions.delete(user.token); return send(res, 200, { ok: true }); }
+  if (parts[0] === 'logout') { endSession(user.token); return send(res, 200, { ok: true }); }
   if (parts[0] === 'me') {
     if (method === 'PUT') { // change own password
       const { current, password } = await readBody(req);
@@ -242,6 +308,7 @@ async function api(req, res, url) {
       if (next.gstin) next.gstin = String(next.gstin).trim().toUpperCase();
       const bad = Shared.checkGstin(next.gstin, next.state);
       if (bad) throw fail(400, 'Company ' + bad);
+      if (next.labourFrom && !/^\d{4}-\d{2}-\d{2}$/.test(next.labourFrom)) throw fail(400, 'Labour payable start date is not a valid date');
       db.data.settings = next;
       db.save();
     }
@@ -274,7 +341,7 @@ async function api(req, res, url) {
     db.copyTo(db.FILE.replace(/\.sqlite$/, '') + '-before-restore-' + new Date().toISOString().replace(/[:.]/g, '-') + '.sqlite');
     db.replace(body);
     seed.ensureBase(db.data); db.save();
-    sessions.clear();
+    sessions.clear(); db.sessions.clear();
     return send(res, 200, { ok: true });
   }
   if (parts[0] === 'demo' && method === 'POST') {
@@ -353,11 +420,19 @@ if (process.env.AUTO_BACKUP !== '0') {
 // Close the database cleanly on Ctrl + C / window close.
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGBREAK']) process.on(sig, () => { db.close(); process.exit(0); });
 
+// Behind a hosting proxy, Node's default 5-second keep-alive is shorter than the proxy's: the proxy
+// can then reuse a connection Node has just closed, and that request fails or hangs. Keep them open longer.
+server.keepAliveTimeout = 65e3;
+server.headersTimeout = 66e3;
+
 server.listen(PORT, HOST, () => {
   console.log('Majumdaar Hosiery ERP running at http://' + (HOST || 'localhost') + ':' + PORT);
   const adm = db.data.users.find(u => u.username === 'admin' && u.active !== false);
-  if (adm && verifyPassword('admin123', adm.salt, adm.hash)) console.log('WARNING: the admin password is still the default (admin123). Change it in Settings before using the ERP on a network or the internet.');
-  console.log('Database: ' + db.FILE + ' (SQLite)');
+  // Checked in the background so the first visitor (who woke the app) is not kept waiting.
+  if (adm && adm.salt && adm.hash) crypto.scrypt('admin123', adm.salt, 32, (err, key) => {
+    if (!err && key.toString('hex') === adm.hash) console.log('WARNING: the admin password is still the default (admin123). Change it in Settings before using the ERP on a network or the internet.');
+  });
+  console.log('Database: ' + db.FILE + ' (SQLite, journal ' + db.journalMode + ')');
   if (db.migratedFrom) {
     const n = db.COLLECTIONS.reduce((s, c) => s + db.data[c].length, 0);
     console.log('Imported ' + n + ' records from ' + db.migratedFrom + ' into the new database. That JSON file was left unchanged as a safety copy.');

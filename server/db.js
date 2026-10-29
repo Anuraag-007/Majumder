@@ -36,7 +36,7 @@ const SCHEMA_VERSION = 1;
 const COLLECTIONS = [
   'users', 'roles', 'units', 'items', 'parties', 'locations', 'machines', 'processes', 'boms', 'priceList',
   'purchaseOrders', 'grn', 'purchaseBills', 'payments',
-  'transfers', 'stockAdjust', 'knitting', 'dyeing', 'finishing', 'overheads',
+  'transfers', 'stockAdjust', 'knitting', 'dyeing', 'finishing', 'overheads', 'labourPayments',
   'salesOrders', 'deliveries', 'invoices', 'receipts',
 ];
 
@@ -73,8 +73,18 @@ function open() {
   conn = new DatabaseSync(FILE);
   // WAL is fastest and safest on a normal disk. Some shared-hosting file systems don't support it:
   // set SQLITE_JOURNAL=DELETE there.
-  const journal = /^(WAL|DELETE|TRUNCATE)$/i.test(process.env.SQLITE_JOURNAL || '') ? process.env.SQLITE_JOURNAL.toUpperCase() : 'WAL';
-  conn.exec('PRAGMA journal_mode = ' + journal + '; PRAGMA synchronous = FULL; PRAGMA busy_timeout = 5000;');
+  // If the disk refuses WAL (some shared hosting does), fall back to DELETE instead of stopping.
+  const wanted = /^(WAL|DELETE|TRUNCATE)$/i.test(process.env.SQLITE_JOURNAL || '') ? process.env.SQLITE_JOURNAL.toUpperCase() : 'WAL';
+  conn.exec('PRAGMA busy_timeout = 5000');
+  let mode = '';
+  try { mode = String(conn.prepare('PRAGMA journal_mode = ' + wanted).get().journal_mode || '').toUpperCase(); }
+  catch (e) { console.error('SQLite journal mode ' + wanted + ' not supported here (' + e.message + '); using DELETE.'); }
+  if (mode !== wanted) {
+    if (mode) console.error('SQLite journal mode ' + wanted + ' not available here (got ' + mode + '); using DELETE.');
+    mode = String(conn.prepare('PRAGMA journal_mode = DELETE').get().journal_mode || '').toUpperCase();
+  }
+  db.journalMode = mode;
+  conn.exec('PRAGMA synchronous = FULL');
   conn.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
   for (const c of COLLECTIONS) {
     conn.exec(`CREATE TABLE IF NOT EXISTS "${c}" (
@@ -94,6 +104,15 @@ function open() {
   }
   stmt.metaGet = conn.prepare('SELECT key, value FROM meta');
   stmt.metaSet = conn.prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  stmt.dataVersion = conn.prepare('PRAGMA data_version');
+  // Sign-in sessions are kept on disk so a restart does not sign everyone out (Hostinger stops an
+  // idle app and starts it again on the next visit). Only a hash of each token is stored.
+  conn.exec('CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, expires INTEGER NOT NULL)');
+  stmt.sesGet = conn.prepare('SELECT user_id, expires FROM sessions WHERE token_hash = ?');
+  stmt.sesSet = conn.prepare('INSERT INTO sessions (token_hash, user_id, expires) VALUES (?, ?, ?) ON CONFLICT(token_hash) DO UPDATE SET user_id = excluded.user_id, expires = excluded.expires');
+  stmt.sesDel = conn.prepare('DELETE FROM sessions WHERE token_hash = ?');
+  stmt.sesPurge = conn.prepare('DELETE FROM sessions WHERE expires < ?');
+  stmt.sesClear = conn.prepare('DELETE FROM sessions');
 }
 
 db.load = function () {
@@ -120,7 +139,29 @@ db.load = function () {
   db.data = normalize(d);
   if (isNew) db.save();
   db.version++;
+  lastDataVersion = stmt.dataVersion.get().data_version;
   return db.data;
+};
+
+// Another process wrote to the database since we last looked (for example the old copy of the app
+// still answering while the host starts the new one): reload, so this process never saves on top of
+// stale data. Returns true when it reloaded.
+let lastDataVersion = null;
+db.refreshIfChanged = function () {
+  if (!conn) return false;
+  const v = stmt.dataVersion.get().data_version;
+  if (v === lastDataVersion) return false;
+  db.load();
+  return true;
+};
+
+const tokenHash = token => crypto.createHash('sha256').update(String(token)).digest('hex');
+db.sessions = {
+  get(token) { const r = stmt.sesGet.get(tokenHash(token)); return r ? { userId: r.user_id, exp: r.expires } : null; },
+  set(token, s) { stmt.sesSet.run(tokenHash(token), s.userId, s.exp); },
+  delete(token) { stmt.sesDel.run(tokenHash(token)); },
+  purge(now) { stmt.sesPurge.run(now); },
+  clear() { stmt.sesClear.run(); },
 };
 
 // Write every change since the last save in one transaction.

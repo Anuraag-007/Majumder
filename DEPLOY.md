@@ -33,7 +33,7 @@ Compress-Archive -Path "$src\server.js", "$src\server", "$src\public", "$src\pac
 
 1. Open **hPanel → Files → File Manager**. At the top level (the folder that contains `domains` and `public_html`) create a new folder named **`erp-data`**.
 2. Open `erp-data`, **upload** the database file you downloaded, and **rename** it to exactly **`erp.sqlite`**.
-3. Note the full path of the folder. It looks like **`/home/u123456789/erp-data`** (your `u…` number is shown in File Manager and in hPanel's account details). You need it in step A3.
+3. Note the full path of the folder: **`/home/<your-u-number>/erp-data`**, for example `/home/u603235959/erp-data`. Your own `u…` number is shown in File Manager's path bar, in hPanel's account details, and in the app's Runtime logs. **Don't copy an example number**: it must be yours, or the ERP stops with *permission denied*. You need this path in step A3.
 
 ## A3. Create the Node.js app
 
@@ -55,11 +55,11 @@ Compress-Archive -Path "$src\server.js", "$src\server", "$src\public", "$src\pac
 | Start command | **`npm start`** |
 | Output directory | leave **empty** |
 
-4. **Environment variables**: add these (use your own `u…` number):
+4. **Environment variables**: add these. Replace `<your-u-number>` with your own number, e.g. `u603235959`:
 
 | Name | Value |
 |---|---|
-| `DATA_DIR` | `/home/u123456789/erp-data` |
+| `DATA_DIR` | `/home/<your-u-number>/erp-data` |
 | `TRUST_PROXY` | `1` |
 | `NODE_ENV` | `production` |
 
@@ -88,17 +88,33 @@ Do **not** set `PORT` or `HOST`; Hostinger provides the port itself.
 1. On the PC make a new `erp-upload.zip` (step A1.4).
 2. In hPanel open the web app and **upload the new files / redeploy**.
 
-Your database is safe because it lives in `erp-data`, outside the app folder. After an update everyone signs in again and presses **Ctrl + F5** once.
+Your database is safe because it lives in `erp-data`, outside the app folder. Sign-ins are kept too, so nobody has to sign in again. If a screen looks odd straight after an update, press **Ctrl + F5** once.
 
 ## A7. If something goes wrong
 
 | What you see | What to do |
 |---|---|
 | Empty ERP, admin / admin123 works | `DATA_DIR` is wrong or the file isn't named `erp.sqlite`. Fix and redeploy |
+| 503 page, Runtime logs show **EACCES: permission denied, mkdir** | `DATA_DIR` has someone else's / an example `u…` number. Use your own (shown in the same log line's path) and redeploy |
 | Log or screen mentions **disk I/O error** or **database is locked** | Add the environment variable `SQLITE_JOURNAL` = `DELETE`, then redeploy |
 | Log says *needs Node.js 22.13 or newer* | Choose Node.js **24.x** in the build settings and redeploy |
 | *Too many wrong passwords. Sign-in is paused* | After 5 wrong passwords that name is paused for 15 minutes from that address; wait, or restart the app in hPanel |
-| Everyone was signed out | The app was restarted or updated (sign-ins live in memory). Sign in again |
+| The first page after a quiet spell is slow, with *Waiting for the server…* at the top | Normal on this plan: Hostinger stops a Node.js app when nobody uses it and starts it again on the next visit, which takes a few seconds. Sign-ins and data are kept. To avoid the wait, keep it awake (A8) |
+| Slow pages or 503 errors at busy times | **hPanel → Websites → Resource usage**. CPU, memory and the **process limit** are shared by every website on the plan, so another site can slow the ERP. Stop apps and sites you don't use, or move up a plan |
+| *The server did not answer properly. Open the list to check whether it was saved* | The connection dropped while saving. Open the list: if the entry is there it was saved; if not, enter it again |
+| Everyone was signed out | Happens only after restoring a backup, or after 12 hours without use. Sign in again |
+
+## A8. Keep the ERP awake (optional)
+
+Hostinger stops a Node.js app after a period without visitors (they don't publish how long) and starts it again when the next person opens it. The ERP keeps everyone's sign-in through this, and shows *Waiting for the server…* while it starts, but the first person still waits a few seconds. To avoid that, have something open a small health-check page every 5 minutes:
+
+- **Hostinger cron job:** hPanel → **Advanced → Cron Jobs** → *Custom*, run every 5 minutes (`*/5 * * * *`), command:
+  ```
+  curl -s -o /dev/null https://erp.yourdomain.com/api/health
+  ```
+- **Or a free uptime monitor** (for example UptimeRobot) checking `https://erp.yourdomain.com/api/health` every 5 minutes. It also emails you if the ERP goes down.
+
+The health page needs no sign-in and shows no data, only `{"ok":true}`. If the first page is still slow in the morning, the quiet period is shorter than 5 minutes; use a shorter interval.
 
 **Good to know:**
 - **Run one copy only.** Use one app, and don't keep using the office PC server as well; they would be two separate databases.
@@ -258,7 +274,7 @@ A backup that only lives on the same server is not enough.
 cd /var/www/erp && unzip -o /root/erp-upload.zip && chown -R erp:erp /var/www/erp && sudo -u erp -H pm2 restart erp
 ```
 
-The zip never contains `data/`, so your database is never overwritten. After a restart everyone signs in again and presses **Ctrl + F5** once.
+The zip never contains `data/`, so your database is never overwritten. Sign-ins are kept through the restart; if a screen looks odd afterwards, press **Ctrl + F5** once.
 
 ## B9. If something goes wrong
 

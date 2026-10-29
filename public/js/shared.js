@@ -8,10 +8,22 @@
 
   const CATEGORIES = ['Yarn', 'Dyes & Chemicals', 'Packing Material', 'Others', 'Grey Fabric', 'Colored Fabric', 'Finished Goods'];
   const RAW_CATEGORIES = ['Yarn', 'Dyes & Chemicals', 'Packing Material', 'Others'];
+  // Material that carries one lot number from the GRN to the sale. Chemicals and packing are used up
+  // in production, so they have no lot.
+  const LOT_CATEGORIES = ['Yarn', 'Grey Fabric', 'Colored Fabric', 'Finished Goods'];
+  const lotFmt = n => 'L-' + String(n).padStart(4, '0');
+  // Knitted fabric keeps the lot of its main yarn: the yarn line with the most kg (Lycra etc. are minor).
+  const mainLot = lines => {
+    let best = null;
+    for (const l of lines || []) if (l && l.item && String(l.lot || '').trim() && (!best || num(l.qty) > num(best.qty))) best = l;
+    return best ? String(best.lot).trim() : '';
+  };
   const PARTY_TYPES = ['Supplier', 'Customer', 'Job Worker', 'Both'];
   const OVERHEAD_CATEGORIES = ['Factory Overheads', 'Utilities (Power/Water)', 'Machine Running Cost', 'Maintenance', 'Other'];
   const PAY_MODES = ['Cash', 'Bank Transfer', 'UPI', 'Cheque'];
   const STAGES = ['Knitting', 'Dyeing', 'Finishing'];
+  // Names used for the stages on the labour screens.
+  const STAGE_LABELS = { Knitting: 'Knitting', Dyeing: 'Color (Dyeing)', Finishing: 'Finishing & Packing' };
 
   // Collections whose documents carry GST on their lines.
   const TAX_COLS = { purchaseOrders: 1, purchaseBills: 1, salesOrders: 1, invoices: 1 };
@@ -81,6 +93,64 @@
     return doc;
   }
 
+  /* ---------------- finished-goods rolls ---------------- */
+  // "20.2 + 50.3 + 39.5" (or with commas / spaces / "kg") -> [20.2, 50.3, 39.5].
+  // Empty text gives []; anything that is not a positive number gives null.
+  function parseRolls(text) {
+    const parts = String(text || '').replace(/kgs?/gi, ' ').split(/[+,;\s]+/).filter(Boolean);
+    const out = [];
+    for (const p of parts) { const n = Number(p); if (!isFinite(n) || n <= 0) return null; out.push(r3(n)); }
+    return out;
+  }
+  const fmtRolls = list => (list || []).map(x => String(r3(typeof x === 'object' ? x.kg : x))).join(' + ');
+  // Takes `qty` kg from the rolls in roll order: whole rolls first, the last one is cut.
+  // bag: [{ no, kg }]. Returns { picks: [{ no, kg }], short } (short = kg the rolls could not cover).
+  function allocRolls(bag, qty) {
+    const picks = [];
+    let need = r3(qty);
+    for (const r of (bag || []).slice().sort((a, b) => a.no - b.no)) {
+      if (need <= 0.0005) break;
+      if (!(r.kg > 0.0005)) continue;
+      const take = r3(Math.min(r.kg, need));
+      picks.push({ no: r.no, kg: take });
+      need = r3(need - take);
+    }
+    return { picks, short: need > 0.0005 ? need : 0 };
+  }
+
+  /* ---------------- guidance when stock is missing ---------------- */
+  // A location has none (or too little) of an item: say where it is instead and which step brings it.
+  // cat: item category; haveAt: { locId: qty } of the same item (or category) now; names: { locId: name }.
+  // Returns { text, screen } where screen is the entry screen that fixes it.
+  function supplyHint(cat, loc, haveAt, names, unit) {
+    const nm = id => (names && names[id]) || id;
+    const amt = q => r3(q) + (unit ? ' ' + unit : '');
+    const at = id => (haveAt && haveAt[id]) || 0;
+    const other = Object.entries(haveAt || {}).filter(([l, q]) => l !== loc && q > 0.0005);
+    if (cat === 'Yarn' && loc === 'KNIT') {
+      return at('STORE') > 0.0005
+        ? { text: nm('STORE') + ' has ' + amt(at('STORE')) + ': issue it to the ' + nm('KNIT') + ' first (Yarn Issue to Knitting).', screen: 'yarnIssue' }
+        : { text: 'There is none in the ' + nm('STORE') + ' either: receive it with a GRN first, then issue it to the ' + nm('KNIT') + '.', screen: 'grn' };
+    }
+    if (cat === 'Grey Fabric' && loc === 'DYE') {
+      return at('KNIT') > 0.0005
+        ? { text: amt(at('KNIT')) + ' is still at the ' + nm('KNIT') + ': send it with Transfer to Color Factory.', screen: 'greyTransfer' }
+        : { text: 'Knit a lot first: each knitting entry sends its grey fabric straight to the ' + nm('DYE') + '.', screen: 'knitting' };
+    }
+    if (cat === 'Colored Fabric' && loc === 'DYE') return { text: 'Dye a lot first (Dyeing / Coloring).', screen: 'dyeing' };
+    if (cat === 'Finished Goods' && loc === 'FG') {
+      return other.length
+        ? { text: amt(other[0][1]) + ' is at ' + nm(other[0][0]) + ': move it to the ' + nm('FG') + ' with a stock transfer.', screen: 'transfers' }
+        : { text: 'Finish and pack a lot first, or receive bought-in goods at the ' + nm('FG') + ' with a GRN.', screen: 'finishing' };
+    }
+    if (RAW_CATEGORIES.includes(cat) && loc === 'STORE') {
+      return { text: (other.length ? 'It is at ' + other.map(([l, q]) => nm(l) + ' (' + amt(q) + ')').join(', ') + ', not in the store. ' : '') + 'To get more, raise a purchase order and receive it with a GRN.', screen: 'purchaseOrders' };
+    }
+    return other.length
+      ? { text: 'It is at ' + other.map(([l, q]) => nm(l) + ' (' + amt(q) + ')').join(', ') + ': move it with a stock transfer.', screen: 'transfers' }
+      : { text: 'Receive it with a GRN, or enter it as opening stock.', screen: 'grn' };
+  }
+
   function partyIs(p, kind) {
     if (!p) return false;
     if (p.type === 'Both') return true;
@@ -110,12 +180,13 @@
     { k: 'invoices', label: 'Sales invoices', group: 'Sales' },
     { k: 'receipts', label: 'Customer receipts', group: 'Finance & Accounts' },
     { k: 'payments', label: 'Supplier payments', group: 'Finance & Accounts' },
+    { k: 'labourPayments', label: 'Labour payments (knitting, color, finishing)', group: 'Finance & Accounts' },
     { k: 'rep_inventory', label: 'Stock reports', group: 'Reports', viewOnly: true },
     { k: 'rep_purchase', label: 'Purchase reports', group: 'Reports', viewOnly: true },
     { k: 'rep_production', label: 'Production, lot & wastage reports', group: 'Reports', viewOnly: true },
     { k: 'rep_costing', label: 'Costing & profitability reports', group: 'Reports', viewOnly: true },
     { k: 'rep_sales', label: 'Sales reports', group: 'Reports', viewOnly: true },
-    { k: 'rep_accounts', label: 'Outstanding, ledger & GST reports', group: 'Reports', viewOnly: true },
+    { k: 'rep_accounts', label: 'Outstanding, ledger, labour payable & GST reports', group: 'Reports', viewOnly: true },
   ];
   const MASTER_COLS = ['units', 'items', 'parties', 'locations', 'machines', 'processes', 'boms'];
   const ADMIN_COLS = ['users', 'roles'];
@@ -133,12 +204,13 @@
     production: 'rep_production', lots: 'rep_production', wastage: 'rep_production',
     costing: 'rep_costing', itemCosting: 'rep_costing', overheads: 'rep_costing', profitability: 'rep_costing',
     sales: 'rep_sales', soPending: 'rep_sales',
-    outstanding: 'rep_accounts', partyLedger: 'rep_accounts', gst: 'rep_accounts',
+    outstanding: 'rep_accounts', partyLedger: 'rep_accounts', gst: 'rep_accounts', labourPayable: 'rep_accounts',
+    labourBalance: 'labourPayments', // "still payable" figure shown on the labour payment form
     // stockChoices, nextLot, partyBalance are helpers used inside forms: open to every signed-in user
   };
   const levelAtLeast = (have, need) => LEVELS.indexOf(have || 'none') >= LEVELS.indexOf(need);
 
-  const Shared = { r2, r3, num, CATEGORIES, RAW_CATEGORIES, PARTY_TYPES, OVERHEAD_CATEGORIES, PAY_MODES, STAGES, TAX_COLS, PRICED_COLS, applyTotals, isInterState, STATES, STATE_NAMES, stateCode, checkGstin, partyIs, LEVELS, PERM_AREAS, MASTER_COLS, ADMIN_COLS, areaOf, REPORT_AREA, levelAtLeast };
+  const Shared = { r2, r3, num, CATEGORIES, RAW_CATEGORIES, LOT_CATEGORIES, lotFmt, mainLot, PARTY_TYPES, OVERHEAD_CATEGORIES, PAY_MODES, STAGES, STAGE_LABELS, TAX_COLS, PRICED_COLS, applyTotals, isInterState, parseRolls, fmtRolls, allocRolls, supplyHint, STATES, STATE_NAMES, stateCode, checkGstin, partyIs, LEVELS, PERM_AREAS, MASTER_COLS, ADMIN_COLS, areaOf, REPORT_AREA, levelAtLeast };
   if (typeof module !== 'undefined' && module.exports) module.exports = Shared;
   else root.Shared = Shared;
 })(this);
