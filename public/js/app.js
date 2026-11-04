@@ -110,7 +110,7 @@ async function route() {
   mainEl.scrollTop = 0;
   const edge = highlightNav();
   // Screens opened from the menu take the colour of their menu box; the dashboard keeps its mixed colours.
-  const themed = !!edge && ['list', 'edit', 'report', 'settings'].includes(parts[0]);
+  const themed = !!edge && ['list', 'edit', 'report', 'settings', 'approvals'].includes(parts[0]);
   mainEl.classList.toggle('themed', themed);
   if (themed) mainEl.style.setProperty('--page-edge', edge); else mainEl.style.removeProperty('--page-edge');
   const target = h('div');
@@ -120,7 +120,8 @@ async function route() {
     switch (parts[0] || 'dashboard') {
       case 'dashboard': await renderDashboard(target, query); break;
       case 'list': await renderList(target, parts[1], query); break;
-      case 'edit': await renderForm(target, parts[1], parts[2] || 'new'); break;
+      case 'edit': await renderForm(target, parts[1], parts[2] || 'new', query); break;
+      case 'approvals': await renderApprovals(target); break;
       case 'report': await renderReport(target, parts[1], query); break;
       case 'reports': renderReportsHub(target); break;
       case 'settings': await renderSettings(target); break;

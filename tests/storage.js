@@ -64,7 +64,7 @@ const cols = run(A, `const { DatabaseSync } = require('node:sqlite'); const s = 
   s.close(); return { r, k, tables };`);
 ok(/^INV-\d{4}$/.test(cols.r.doc_no) && /^\d{4}-\d{2}-\d{2}$/.test(cols.r.doc_date), 'invoice table shows number and date columns (' + cols.r.doc_no + ', ' + cols.r.doc_date + ')');
 ok(cols.k.label === 'L-0001', 'knitting table shows the lot number');
-ok(cols.tables === 27, 'one table per area plus settings and sign-ins (' + cols.tables + ' tables)');
+ok(cols.tables === 40, 'one table per area plus settings, sign-ins and the activity log (' + cols.tables + ' tables)');
 
 // 4. import from an old db.json
 const B = tmp();

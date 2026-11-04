@@ -38,6 +38,9 @@ const COLLECTIONS = [
   'purchaseOrders', 'grn', 'purchaseBills', 'payments',
   'transfers', 'stockAdjust', 'knitting', 'dyeing', 'finishing', 'overheads', 'labourPayments',
   'salesOrders', 'deliveries', 'invoices', 'receipts',
+  // added with CRM, accounts, staff and approvals
+  'leads', 'quotations', 'jobStatus', 'banks', 'bankEntries', 'employees', 'attendance', 'salary', 'loans', 'emiPayments', 'powerBills',
+  'approvals',
 ];
 
 const DEFAULT_SETTINGS = {
@@ -52,6 +55,10 @@ const DEFAULT_SETTINGS = {
   valuation: 'AVG',          // AVG | FIFO for store items
   allowNegativeStock: false,
   invoiceTerms: 'Goods once sold will not be taken back. Interest @18% p.a. will be charged on overdue bills.',
+  lotPattern: 'L-####',      // see Shared.lotFmt
+  rollKg: 17,                // average kg per roll, used to estimate kg from rolls when the lot gives none
+  weighRolls: false,         // true: finished rolls are weighed one by one (roll weights on finishing)
+  approveChanges: false,     // staff edits / deletions of saved entries wait for an administrator
 };
 
 const db = { data: null, DIR, FILE, LEGACY_JSON, COLLECTIONS, version: 0, migratedFrom: null };
@@ -113,6 +120,13 @@ function open() {
   stmt.sesDel = conn.prepare('DELETE FROM sessions WHERE token_hash = ?');
   stmt.sesPurge = conn.prepare('DELETE FROM sessions WHERE expires < ?');
   stmt.sesClear = conn.prepare('DELETE FROM sessions');
+  // Activity log: who created, changed or deleted what. Written straight to disk (not kept in memory).
+  conn.exec(`CREATE TABLE IF NOT EXISTS activity (
+    n INTEGER PRIMARY KEY, at TEXT NOT NULL, user TEXT, action TEXT, col TEXT, doc_id TEXT, label TEXT, detail TEXT)`);
+  conn.exec('CREATE INDEX IF NOT EXISTS activity_at ON activity (at)');
+  stmt.actAdd = conn.prepare('INSERT INTO activity (at, user, action, col, doc_id, label, detail) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  stmt.actList = conn.prepare(`SELECT at, user, action, col, doc_id AS docId, label, detail FROM activity
+    WHERE at >= ? AND at <= ? AND (? = '' OR lower(user) = lower(?)) AND (? = '' OR col = ?) ORDER BY n DESC LIMIT ?`);
 }
 
 db.load = function () {
@@ -162,6 +176,15 @@ db.sessions = {
   delete(token) { stmt.sesDel.run(tokenHash(token)); },
   purge(now) { stmt.sesPurge.run(now); },
   clear() { stmt.sesClear.run(); },
+};
+
+db.activity = {
+  add(e) { stmt.actAdd.run(new Date().toISOString(), e.user || '', e.action || '', e.col || '', e.docId || '', e.label || '', e.detail || ''); },
+  // from / to: YYYY-MM-DD (inclusive). Newest first.
+  list(q) {
+    const from = q.from || '0000', to = (q.to || '9999-12-31') + 'T99', user = q.user || '', col = q.col || '';
+    return stmt.actList.all(from, to, user, user, col, col, Math.min(+q.limit || 2000, 10000));
+  },
 };
 
 // Write every change since the last save in one transaction.

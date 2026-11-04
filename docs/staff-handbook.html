@@ -106,23 +106,30 @@ table { margin: 3px 0 8px; }
     <div class="badge">MH</div>
     <h1>Majumdaar Hosiery ERP</h1>
     <div class="sub">Staff Handbook</div>
-    <p class="lead">How to fill in the master lists, and how material moves through the ERP from buying yarn to finished rolls in the store, explained step by step with one real example.</p>
+    <p class="lead">How to fill in the master lists, how material moves through the ERP from buying yarn to finished rolls in the godown (explained step by step with one real example), and how the rest of the business is kept: customers, money, staff and GST.</p>
   </div>
   <div class="toc">
     <h3>Contents</h3>
     <ol>
       <li><b>Masters</b>: what they are and the order to fill them</li>
       <li>Units</li>
-      <li>Locations</li>
+      <li>Locations <span>(stores, godowns, agencies)</span></li>
       <li>Items <span>(materials and products)</span></li>
-      <li>Parties <span>(suppliers and customers)</span></li>
+      <li>Parties <span>(suppliers, customers and agencies)</span></li>
       <li>Machines</li>
-      <li>Processes <span>(labour rates)</span></li>
+      <li>Processes <span>(standard rates)</span></li>
       <li>BOM / Recipes</li>
       <li>Party Price List</li>
       <li><b>Workflow</b>: yarn purchase to finished rolls, 7 steps</li>
       <li>What the ERP shows you at the end</li>
       <li>Selling the finished lot</li>
+      <li>Paying the agencies</li>
+      <li>Keeping track of the agencies</li>
+      <li>Godowns</li>
+      <li>Customers, leads and quotations</li>
+      <li>Money: bank, cash, expenses, bills, EMIs</li>
+      <li>Staff, attendance and salary</li>
+      <li>GST reports, approvals and the activity log</li>
       <li>Quick fixes for common messages</li>
       <li>Who does what</li>
     </ol>
@@ -135,18 +142,18 @@ table { margin: 3px 0 8px; }
   <div class="part-head">
     <div class="k">Part 1</div>
     <h1>Masters: the fixed lists</h1>
-    <p>Masters are the lists the ERP uses everywhere: your materials, your customers and suppliers, your machines. Fill them in once; after that every screen lets you pick from a list instead of typing, and rates, GST and labour fill in automatically.</p>
+    <p>Masters are the lists the ERP uses everywhere: your materials, your suppliers and customers, and the agencies that knit, dye and finish for you. Fill them in once; after that every screen lets you pick from a list instead of typing, and rates, GST and job charges fill in automatically.</p>
   </div>
 
   <div class="sec">
     <h3>Fill them in this order (each one uses the ones before it)</h3>
     <ol class="order">
       <li><b>Units</b>: already filled (Kg, Nos, Roll…). Add only if you need a new one.</li>
-      <li><b>Locations</b>: the 4 main places are already there.</li>
+      <li><b>Locations</b>: the stores are already there; each agency gets its own when you add it as a party.</li>
       <li><b>Items</b>: all your materials and products.</li>
-      <li><b>Parties</b>: suppliers and customers.</li>
-      <li><b>Machines</b>: knitting and dyeing machines.</li>
-      <li><b>Processes</b>: labour rates (3 are already there; set your real rates).</li>
+      <li><b>Parties</b>: suppliers, customers and <b>job-work agencies</b> (knitting, dyeing, finishing).</li>
+      <li><b>Machines</b>: optional; knitting and dyeing machines.</li>
+      <li><b>Processes</b>: standard rates per kg (3 are already there), used when an agency has no rate of its own.</li>
       <li><b>BOM / Recipes</b>: dye recipes and packing standards.</li>
       <li><b>Party Price List</b> (under Sales): special prices for customers.</li>
     </ol>
@@ -166,20 +173,22 @@ table { margin: 3px 0 8px; }
 
   <div class="sec">
     <h2><span class="n">2</span>Locations</h2>
-    <p class="what">The places where stock is kept. Stock is always counted <b>per place</b>, so the ERP knows how much yarn is in the store and how much is at the knitting unit.</p>
+    <p class="what">The places where stock is kept. Stock is always counted <b>per place</b>, so the ERP knows how much yarn is in your store and how much is lying at each agency.</p>
     <table>
-      <tr><th style="width:30%">Already there (cannot be deleted)</th><th>What is kept there</th></tr>
+      <tr><th style="width:30%">Place</th><th>What is kept there</th></tr>
       <tr><td><b>Main Store</b></td><td>Yarn, dyes &amp; chemicals, packing material as received</td></tr>
-      <tr><td><b>Knitting Factory</b></td><td>Yarn issued for knitting, grey fabric just knitted</td></tr>
-      <tr><td><b>Color Factory</b></td><td>Grey fabric waiting to be dyed, dyed fabric waiting to be finished</td></tr>
+      <tr><td><b>Each agency</b> <span style="font-weight:400">(made by itself)</span></td><td>Your material lying with that agency: yarn issued to a knitter, grey fabric at a dyeing house, dyed fabric at a finisher. Named after the agency; it appears when you add the agency in Parties</td></tr>
       <tr><td><b>Finished Goods Store</b></td><td>Packed rolls ready to sell</td></tr>
+      <tr><td><b>Godown 2, Godown 3 …</b> <span style="font-weight:400">(you add them)</span></td><td>More places for finished rolls: a second godown, a customer-ready stock area. Rolls can be finished into, moved between and sold from any godown</td></tr>
+      <tr><td><b>Knitting Factory</b>, <b>Color Factory</b></td><td>Only for work done in <b>your own</b> factory. If all work goes to agencies, open them and tick <b>Not in use</b> so they stay out of the lists</td></tr>
     </table>
-    <p>Add a new location only for another godown, or an outside job worker who holds your material.</p>
-    <div class="where">Masters → Locations → + New location</div>
+    <p>Add a location yourself for another godown (type <b>Godown</b>) or another raw-material store (type <b>Store</b>).</p>
+    <div class="where">Masters → Locations &amp; Godowns → + New location</div>
     <table>
       <tr><th style="width:26%">Box</th><th>What to write</th><th style="width:22%">Example</th></tr>
-      <tr><td>Location name *</td><td>The place</td><td class="ex">Howrah Godown</td></tr>
-      <tr><td>Type</td><td>Store, Factory or Job Worker</td><td class="ex">Store</td></tr>
+      <tr><td>Location name *</td><td>The place</td><td class="ex">Godown 2 (Burrabazar)</td></tr>
+      <tr><td>Type</td><td>Godown (finished goods), Store (raw material), Factory or Job Worker</td><td class="ex">Godown</td></tr>
+      <tr><td>Not in use</td><td>Tick to hide it on the entry screens</td><td class="ex">—</td></tr>
       <tr><td>Remarks</td><td>Anything useful</td><td class="ex">Extra yarn storage</td></tr>
     </table>
   </div>
@@ -210,7 +219,7 @@ table { margin: 3px 0 8px; }
       <tr><td><b>Dyes &amp; Chemicals</b></td><td>Dyes, soda ash, salt, softener</td><td>Purchase, dyeing, dye recipes</td></tr>
       <tr><td><b>Packing Material</b></td><td>Poly bags, paper tubes, tape</td><td>Purchase, finishing &amp; packing, packing recipes</td></tr>
       <tr><td><b>Others</b></td><td>Anything else you buy</td><td>Purchase</td></tr>
-      <tr><td><b>Grey Fabric</b></td><td>Fabric straight off the knitting machine</td><td>Knitting output, transfer, dyeing input</td></tr>
+      <tr><td><b>Grey Fabric</b></td><td>Fabric straight off the knitting machine</td><td>Knitting output, send grey for dyeing, dyeing input</td></tr>
       <tr><td><b>Colored Fabric</b></td><td>Fabric after dyeing</td><td>Dyeing output, finishing input</td></tr>
       <tr><td><b>Finished Goods</b></td><td>Packed fabric you sell</td><td>Finishing output, sales order, challan, invoice</td></tr>
     </table>
@@ -219,13 +228,13 @@ table { margin: 3px 0 8px; }
   </div>
 
   <div class="sec">
-    <h2><span class="n">4</span>Parties: suppliers and customers</h2>
-    <p class="what">Everyone you buy from or sell to.</p>
+    <h2><span class="n">4</span>Parties: suppliers, customers and agencies</h2>
+    <p class="what">Everyone you buy from or sell to, and every <b>agency</b> that knits, dyes or finishes for you (you may have several for each kind of work).</p>
     <div class="where">Masters → Parties → + New party &nbsp;(or Customers → Customer Master: same list)</div>
     <table>
       <tr><th style="width:24%">Box</th><th>What to write</th><th style="width:28%">Example</th></tr>
       <tr><td>Party name *</td><td>Business name</td><td class="ex">Kolkata Garments Pvt Ltd</td></tr>
-      <tr><td>Type *</td><td><b>Supplier</b> (you buy from them) · <b>Customer</b> (you sell to them) · <b>Job Worker</b> (does work for you) · <b>Both</b></td><td class="ex">Customer</td></tr>
+      <tr><td>Type *</td><td><b>Supplier</b> (you buy from them) · <b>Customer</b> (you sell to them) · <b>Job Worker</b> (an agency that knits, dyes or finishes for you) · <b>Both</b></td><td class="ex">Customer</td></tr>
       <tr><td>Contact person</td><td>Who you talk to</td><td class="ex">Mr. Sen</td></tr>
       <tr><td>Phone / Email</td><td>Contact details</td><td class="ex">+91 98300 12345</td></tr>
       <tr><td>State *</td><td>Pick from the list. <b>Decides the GST type</b></td><td class="ex">West Bengal</td></tr>
@@ -235,13 +244,16 @@ table { margin: 3px 0 8px; }
       <tr><td>Credit days</td><td>Customers: days they get to pay</td><td class="ex">30</td></tr>
       <tr><td>Opening balance (₹)</td><td>What was owed when you started using the ERP</td><td class="ex">25,000</td></tr>
       <tr><td>Dr / Cr</td><td><b>Dr</b> = they owe you · <b>Cr</b> = you owe them</td><td class="ex">Dr</td></tr>
+      <tr><td>Does knitting / dyeing / finishing</td><td>Agencies: tick the work this agency does for you. Tick both dyeing and finishing for a dyeing house that also finishes</td><td class="ex">Does knitting</td></tr>
+      <tr><td>Knitting / Dyeing / Finishing rate (₹/kg)</td><td>Agencies: what it charges per kg for that work. Fills the job charges on each entry</td><td class="ex">9</td></tr>
     </table>
+    <div class="tip"><b>Agencies:</b> when you save an agency, the ERP gives it a <b>place of its own</b> in Locations, named after it. Yarn you issue to it, and fabric sent to it, is counted there until it comes back as the next stage. Its <b>job charges</b> (rate × kg) are added to its account by themselves; you pay it in <b>Finance &amp; Accounts → Supplier Payments</b>, like a supplier.</div>
     <div class="tip"><b>Why State and GSTIN matter:</b> same state as you → the invoice charges <b>CGST + SGST</b>; another state → <b>IGST</b>. The first two digits of a GSTIN must match the state code (West Bengal = 19); the ERP warns you if they don't. When an invoice would take a customer above their <b>credit limit</b>, the ERP asks you to confirm before saving.</div>
   </div>
 
   <div class="sec">
     <h2><span class="n">5</span>Machines</h2>
-    <p class="what">Your knitting and dyeing machines. Picking a machine in a knitting entry lets the ERP show <b>output per machine</b>.</p>
+    <p class="what">Optional: knitting and dyeing machines, if you want to note the machine on an entry.</p>
     <div class="where">Masters → Machines → + New machine</div>
     <table>
       <tr><th style="width:24%">Box</th><th>What to write</th><th style="width:28%">Example</th></tr>
@@ -256,22 +268,22 @@ table { margin: 3px 0 8px; }
   </div>
 
   <div class="sec">
-    <h2><span class="n">6</span>Processes: labour rates</h2>
-    <p class="what">The labour rate you pay per kg for each stage. The ERP uses it to <b>calculate labour automatically</b>, and that labour goes into your <b>cost per kg</b>. Already there: Knitting ₹8/kg, Dyeing ₹15/kg, Finishing &amp; Packing ₹6/kg. <b>Change these to your real rates.</b></p>
+    <h2><span class="n">6</span>Processes: standard rates</h2>
+    <p class="what">A standard rate per kg for each stage. Each agency's <b>own rate</b> (on its party record) comes first; this one is used when an agency has none, and for work in your own factory. The ERP uses the rate to <b>calculate job charges automatically</b>, and they go into your <b>cost per kg</b>. Already there: Knitting ₹8/kg, Dyeing ₹15/kg, Finishing &amp; Packing ₹6/kg.</p>
     <div class="where">Masters → Processes</div>
     <table>
       <tr><th style="width:24%">Box</th><th>What to write</th><th style="width:28%">Example</th></tr>
       <tr><td>Process name *</td><td>Name</td><td class="ex">Knitting</td></tr>
       <tr><td>Stage *</td><td>Knitting, Dyeing or Finishing</td><td class="ex">Knitting</td></tr>
-      <tr><td>Labour rate (₹/kg)</td><td>What you pay per kg</td><td class="ex">8</td></tr>
+      <tr><td>Standard rate (₹/kg)</td><td>The usual rate per kg</td><td class="ex">8</td></tr>
     </table>
     <table>
-      <tr><th style="width:24%">Stage</th><th>Labour is worked out as</th></tr>
+      <tr><th style="width:24%">Stage</th><th>Job charges are worked out as</th></tr>
       <tr><td>Knitting</td><td>rate × <b>kg of grey fabric produced</b></td></tr>
       <tr><td>Dyeing</td><td>rate × <b>kg of grey fabric put in</b></td></tr>
       <tr><td>Finishing</td><td>rate × <b>kg of finished fabric</b></td></tr>
     </table>
-    <p>You can always change the labour amount in a particular entry, for example to a fixed lump sum.</p>
+    <p>You can always change the job charges in a particular entry, for example to a fixed lump sum.</p>
   </div>
 
   <div class="sec">
@@ -315,7 +327,7 @@ table { margin: 3px 0 8px; }
     <ul>
       <li><b>No duplicates.</b> Two items, parties or machines cannot have the same name; the ERP tells you if one exists.</li>
       <li><b>Used records cannot be deleted.</b> Once an item or party is used in an entry it is protected. You can still <b>edit</b> it (spelling, phone number…).</li>
-      <li><b>Changes apply going forward.</b> A new rate, GST % or labour rate affects new entries; saved entries keep their values.</li>
+      <li><b>Changes apply going forward.</b> A new rate, GST % or agency rate affects new entries; saved entries keep their values.</li>
       <li><b>Search and sort:</b> every list has a search box; click a column heading to sort.</li>
     </ul>
   </div>
@@ -326,15 +338,15 @@ table { margin: 3px 0 8px; }
   <div class="part-head">
     <div class="k">Part 2</div>
     <h1>From yarn purchase to finished rolls</h1>
-    <p>One real example all the way through: you buy <b>1,000 kg</b> of Cotton Yarn 30s, knit <b>600 kg</b> of it, dye it <b>Red</b>, and end up with <b>560 kg / 24 rolls</b> of finished fabric.</p>
+    <p>One real example all the way through: you buy <b>1,000 kg</b> of Cotton Yarn 30s, send <b>600 kg</b> to the knitting agency <b>Maa Tara Knitting</b>, have it dyed <b>Red</b> and finished by <b>Bengal Dyeing House</b>, and end up with <b>560 kg / 24 rolls</b> of finished fabric.</p>
   </div>
 
   <div class="sec">
-    <h3>The material moves through four places, one entry at a time</h3>
+    <h3>The material moves through your store and the agencies, one entry at a time</h3>
     <div class="flow">
       <div class="loc" style="--c: var(--yarn)"><b>Main Store</b><span>yarn, dyes, packing</span></div>
-      <div class="loc" style="--c: var(--knit)"><b>Knitting Factory</b><span>yarn → grey fabric</span></div>
-      <div class="loc" style="--c: var(--dye)"><b>Color Factory</b><span>grey → dyed fabric</span></div>
+      <div class="loc" style="--c: var(--knit)"><b>Knitting agency</b><span>yarn → grey fabric</span></div>
+      <div class="loc" style="--c: var(--dye)"><b>Dyeing / finishing agency</b><span>grey → dyed → finished</span></div>
       <div class="loc" style="--c: var(--fin)"><b>Finished Goods Store</b><span>finished rolls</span></div>
     </div>
     <table>
@@ -342,14 +354,14 @@ table { margin: 3px 0 8px; }
       <tr><td>1</td><td>Purchase Order</td><td>Purchase</td><td>You order yarn from the supplier</td></tr>
       <tr><td>2</td><td>Goods Receipt (GRN)</td><td>Store</td><td>Yarn arrives at the <b>Main Store</b> and gets its <b>lot number</b> (L-0001)</td></tr>
       <tr><td>3</td><td>Purchase Bill</td><td>Purchase / Accounts</td><td>Supplier's bill recorded (money only)</td></tr>
-      <tr><td>4</td><td>Yarn Issue to Knitting</td><td>Store</td><td>Yarn sent to the <b>Knitting Factory</b></td></tr>
-      <tr><td>5</td><td>Knitting</td><td>Knitting</td><td>Yarn becomes <b>grey fabric</b> with the <b>same lot number</b>, and goes <b>straight to the Color Factory</b></td></tr>
-      <tr><td>6</td><td>Dyeing</td><td>Dyeing</td><td>Grey becomes <b>coloured fabric</b></td></tr>
-      <tr><td>7</td><td>Finishing &amp; Packing</td><td>Finishing</td><td>Coloured becomes <b>finished rolls</b> in the Finished Goods Store</td></tr>
+      <tr><td>4</td><td>Yarn Issue to Knitting</td><td>Store</td><td>Yarn sent to the <b>knitting agency</b> with a job work challan</td></tr>
+      <tr><td>5</td><td>Knitting</td><td>Knitting</td><td>The agency's <b>grey fabric</b> is recorded with the <b>same lot number</b>, and goes <b>straight to the dyeing agency</b></td></tr>
+      <tr><td>6</td><td>Dyeing</td><td>Dyeing</td><td>The dyeing agency turns grey into <b>coloured fabric</b></td></tr>
+      <tr><td>7</td><td>Finishing &amp; Packing</td><td>Finishing</td><td>The finishing agency's <b>finished rolls</b> come into the Finished Goods Store</td></tr>
     </table>
-    <div class="note"><b>Golden rule:</b> each step can only use what the <b>previous step</b> put there. If a list says <b>"no stock here"</b>, the step before it has not been done yet.</div>
+    <div class="note"><b>Golden rule:</b> each step can only use what the <b>previous step</b> put there, at that agency. If a list says <b>"no stock here"</b>, the step before it has not been done yet, or the material was sent to another agency.</div>
     <div class="note"><b>One lot number, start to finish:</b> the ERP gives the lot number <b>once, on the GRN</b> (L-0001, L-0002 …). Nobody types it. Yarn issue, knitting, dyeing, finishing and the challan all pick that same number from a list, so lot L-0001 is the same lot from the supplier's yarn to the customer's invoice.</div>
-    <div class="tip"><b>Before you start:</b> the items in the example must exist in Masters → Items (Cotton Yarn 30s = Yarn, Grey Single Jersey 30s = Grey Fabric, Dyed Single Jersey 30s = Colored Fabric, Finished Single Jersey 30s = Finished Goods, plus your dyes, chemicals and packing). Add the supplier in Masters → Parties.</div>
+    <div class="tip"><b>Before you start:</b> the items in the example must exist in Masters → Items (Cotton Yarn 30s = Yarn, Grey Single Jersey 30s = Grey Fabric, Dyed Single Jersey 30s = Colored Fabric, Finished Single Jersey 30s = Finished Goods, plus your dyes, chemicals and packing). Add the supplier and both agencies in Masters → Parties: <b>Maa Tara Knitting</b> (Job Worker, tick <i>Does knitting</i>, rate 9) and <b>Bengal Dyeing House</b> (Job Worker, tick <i>Does dyeing</i> rate 15 and <i>Does finishing</i> rate 6).</div>
   </div>
 
   <div class="step" style="--c: var(--yarn)">
@@ -375,7 +387,7 @@ table { margin: 3px 0 8px; }
       <tr><td>Supplier challan no</td><td>From their delivery paper</td></tr>
     </table>
     <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Main Store</td><td><b>1,000 kg</b> Cotton Yarn, lot <b>L-0001</b></td></tr></table></div>
-    <p>Buy your <b>dyes, chemicals and packing material</b> the same way (steps 1 and 2). They are needed in steps 6 and 7.</p>
+    <p>If you supply the <b>dyes, chemicals and packing material</b> to the agencies, buy them the same way (steps 1 and 2). If the agencies use their own, skip this: their rate covers it.</p>
   </div>
 
   <div class="step" style="--c: var(--yarn)">
@@ -389,11 +401,13 @@ table { margin: 3px 0 8px; }
     <div class="where">Inventory → Yarn Issue to Knitting → + New</div>
     <table>
       <tr><th style="width:32%">Box</th><th>Fill</th></tr>
+      <tr><td>Knitting agency</td><td><b>Maa Tara Knitting</b></td></tr>
       <tr><td>Item</td><td>Cotton Yarn 30s</td></tr>
       <tr><td>Yarn lot</td><td><b>L-0001 — 1000 Kg</b> (the list shows what is in the Main Store)</td></tr>
       <tr><td>Qty (kg)</td><td><b>600</b></td></tr>
     </table>
-    <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Main Store</td><td>400 kg yarn</td></tr><tr><td>Knitting Factory</td><td><b>600 kg</b> yarn, lot L-0001</td></tr></table></div>
+    <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Main Store</td><td>400 kg yarn</td></tr><tr><td>Maa Tara Knitting</td><td><b>600 kg</b> yarn, lot L-0001 (still yours, held by the agency)</td></tr></table></div>
+    <p>Click <b>Print</b>: it prints as a <b>job work delivery challan</b> with the agency's name, address and GSTIN, to send with the yarn.</p>
   </div>
 
   <div class="step" style="--c: var(--knit)">
@@ -401,21 +415,21 @@ table { margin: 3px 0 8px; }
     <div class="where">Production → Knitting → + New</div>
     <table>
       <tr><th style="width:32%">Box</th><th>Fill</th></tr>
-      <tr><td>Machine / Shift</td><td>KM-01 · Day</td></tr>
+      <tr><td>Agency / unit</td><td><b>Maa Tara Knitting</b>. Its job rate fills in (₹9/kg), and the yarn list shows only the yarn issued to it</td></tr>
       <tr><td>Yarn consumed</td><td>Cotton Yarn 30s · lot <b>L-0001</b> · <b>600 kg</b></td></tr>
       <tr><td>Lot no</td><td>Fills in by itself from the yarn: <b>L-0001</b>. With two yarns (e.g. cotton + Lycra) it takes the lot of the one with the most kg</td></tr>
       <tr><td>Grey fabric produced</td><td>Grey Single Jersey 30s</td></tr>
       <tr><td>Output qty (kg) / Rolls</td><td><b>585</b> / <b>25</b></td></tr>
       <tr><td>GSM / Dia</td><td>160 / 30" (optional)</td></tr>
-      <tr><td>Grey fabric goes to</td><td>Already set to <b>Color Factory (ready to dye)</b>. Leave it</td></tr>
+      <tr><td>Grey fabric sent to</td><td>The dyeing agency it goes to: <b>Bengal Dyeing House</b></td></tr>
     </table>
     <p><b>The ERP fills in by itself:</b></p>
     <ul class="auto">
       <li><b>Wastage</b> 600 − 585 = <b>15 kg</b> (2.5%). Change it if the real waste was different.</li>
-      <li><b>Labour</b> ₹8 × 585 kg = <b>₹4,680</b>.</li>
+      <li><b>Job charges</b> ₹9 × 585 kg = <b>₹5,265</b>, added to Maa Tara Knitting's account.</li>
     </ul>
-    <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Knitting Factory</td><td>Yarn used up (600 kg)</td></tr><tr><td>Color Factory</td><td><b>585 kg / 25 rolls</b> grey fabric, lot <b>L-0001</b>, ready to dye. <b>No transfer entry needed</b></td></tr></table></div>
-    <p class="note" style="margin-top:4px"><b>Holding fabric at the knitting unit?</b> Choose <b>Knitting Factory</b> in "Grey fabric goes to". Send it later with <b>Inventory → Transfer to Color Factory</b>.</p>
+    <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Maa Tara Knitting</td><td>Yarn used up (600 kg)</td></tr><tr><td>Bengal Dyeing House</td><td><b>585 kg / 25 rolls</b> grey fabric, lot <b>L-0001</b>, ready to dye. <b>No transfer entry needed</b></td></tr></table></div>
+    <p class="note" style="margin-top:4px"><b>Knitter keeping the fabric for now?</b> Choose <b>Maa Tara Knitting</b> itself in "Grey fabric sent to". Send it later with <b>Inventory → Send Grey for Dyeing</b>.</p>
   </div>
 
   <div class="step" style="--c: var(--dye)">
@@ -423,15 +437,17 @@ table { margin: 3px 0 8px; }
     <div class="where">Production → Dyeing / Coloring → + New</div>
     <table>
       <tr><th style="width:32%">Box</th><th>Fill</th></tr>
+      <tr><td>Agency / unit</td><td><b>Bengal Dyeing House</b>. Its rate fills in (₹15/kg)</td></tr>
       <tr><td>Grey fabric</td><td>Grey Single Jersey 30s</td></tr>
-      <tr><td>Lot no</td><td><b>L-0001</b>. Input qty fills in as <b>585</b></td></tr>
+      <tr><td>Lot no</td><td><b>L-0001</b> (the list shows the lots lying at this agency). Input qty fills in as <b>585</b></td></tr>
       <tr><td>Color / Shade</td><td>Red</td></tr>
-      <tr><td>Dye recipe</td><td>Pick one (e.g. Red Reactive Recipe). Dyes &amp; chemicals fill in by themselves for 585 kg, taken from the <b>Main Store</b></td></tr>
+      <tr><td>Dye recipe</td><td>Only if <b>you supply</b> the dyes &amp; chemicals: pick one and they fill in for 585 kg, taken from the <b>Main Store</b>. If the agency uses its own, leave the table empty</td></tr>
       <tr><td>Colored fabric produced</td><td>Dyed Single Jersey 30s</td></tr>
       <tr><td>Output qty (kg)</td><td><b>570</b></td></tr>
+      <tr><td>Dyed fabric sent to</td><td>Fills in as <b>Bengal Dyeing House</b> because it also finishes. For a separate finishing agency, choose that one</td></tr>
     </table>
-    <p><b>The ERP fills in by itself:</b> wastage <b>15 kg</b>, labour ₹15 × 585 = <b>₹8,775</b>.</p>
-    <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Color Factory</td><td><b>570 kg</b> dyed fabric, lot L-0001 (Red)</td></tr><tr><td>Main Store</td><td>Dyes &amp; chemicals reduced by what was used</td></tr></table></div>
+    <p><b>The ERP fills in by itself:</b> wastage <b>15 kg</b>, job charges ₹15 × 585 = <b>₹8,775</b>.</p>
+    <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Bengal Dyeing House</td><td><b>570 kg</b> dyed fabric, lot L-0001 (Red)</td></tr><tr><td>Main Store</td><td>Dyes &amp; chemicals reduced by what you supplied</td></tr></table></div>
   </div>
 
   <div class="step" style="--c: var(--fin)">
@@ -439,16 +455,17 @@ table { margin: 3px 0 8px; }
     <div class="where">Production → Finishing &amp; Packing → + New</div>
     <table>
       <tr><th style="width:32%">Box</th><th>Fill</th></tr>
+      <tr><td>Agency / unit</td><td><b>Bengal Dyeing House</b>. Its finishing rate fills in (₹6/kg)</td></tr>
       <tr><td>Colored fabric</td><td>Dyed Single Jersey 30s</td></tr>
       <tr><td>Lot no</td><td><b>L-0001</b>. Input qty fills in as <b>570</b></td></tr>
       <tr><td>Finish</td><td>Compacting (or your finish)</td></tr>
-      <tr><td>Packing materials</td><td>Poly bag <b>24</b>, paper tube <b>24</b> (or pick a packing recipe)</td></tr>
+      <tr><td>Packing material</td><td>Only if <b>you supply</b> it: poly bag <b>24</b>, paper tube <b>24</b> (or pick a packing recipe)</td></tr>
       <tr><td>Finished goods produced</td><td>Finished Single Jersey 30s</td></tr>
-      <tr><td>Output qty (kg) / Rolls</td><td><b>560</b> / <b>24</b></td></tr>
+      <tr><td>Output qty (kg) / Rolls</td><td><b>560</b> / <b>24</b>. Rolls fill in from the dyed lot; just count them, nobody needs to weigh each roll</td></tr>
       <tr><td>Meters</td><td><b>2200</b> (optional; gives you cost per meter)</td></tr>
       <tr><td>Quality</td><td>A</td></tr>
     </table>
-    <p><b>The ERP fills in by itself:</b> wastage <b>10 kg</b>, labour ₹6 × 560 = <b>₹3,360</b>.</p>
+    <p><b>The ERP fills in by itself:</b> wastage <b>10 kg</b>, job charges ₹6 × 560 = <b>₹3,360</b>.</p>
     <div class="stock"><div class="cap">Final stock</div><table><tr><td>Finished Goods Store</td><td><b>560 kg / 24 rolls</b> Finished Single Jersey, lot <b>L-0001</b>, ready to sell</td></tr></table></div>
   </div>
 
@@ -468,53 +485,146 @@ table { margin: 3px 0 8px; }
     <table>
       <tr><th style="width:40%">Where to look</th><th>What you see</th></tr>
       <tr><td><b>Inventory → Stock Summary</b> (Finished Goods Store)</td><td>560 kg / 24 rolls, lot L-0001, with its value</td></tr>
-      <tr><td><b>Costing → Lot Costing Sheet</b></td><td>The exact cost of lot L-0001: yarn + dyes + packing + all labour + overheads + wastage = <b>cost per kg, per roll, per meter</b></td></tr>
+      <tr><td><b>Costing → Lot Costing Sheet</b></td><td>The exact cost of lot L-0001: yarn + dyes + packing + all job charges + overheads + wastage = <b>cost per kg, per roll, per meter</b></td></tr>
+      <tr><td><b>Production → Agency Summary</b></td><td>For every agency: material lying there now, kg taken in and delivered, wastage %, job charges and what you owe it. Click an agency to see its lots</td></tr>
       <tr><td><b>Production → Batch / Lot Tracking</b></td><td>Lot L-0001 from the supplier's GRN (1,000 kg received) → 600 kg yarn knitted → 585 grey → 570 dyed → 560 finished = <b>93.3% yield</b>, then kg sold and kg left</td></tr>
       <tr><td><b>Wastage → Wastage Report</b></td><td>Knitting 15 kg, dyeing 15 kg, finishing 10 kg, with their value</td></tr>
     </table>
-    <div class="tip"><b>For accurate costing</b> also enter each month's power bill, rent, maintenance and similar costs in <b>Costing → Overhead Entries</b>. The ERP spreads them over the kilograms finished that month.</div>
+    <div class="tip"><b>For accurate costing</b> also enter each month's electricity bill (<b>Finance &amp; Accounts → Electricity Bills</b>) and factory expenses such as rent and repairs (<b>Expenses</b>, with <i>Add to production cost</i> ticked). The ERP spreads them over the kilograms finished that month.</div>
   </div>
 
   <div class="sec">
     <h2><span class="n">B</span>Selling the finished lot</h2>
     <table>
       <tr><th style="width:6%">#</th><th style="width:34%">Screen</th><th>What to do</th></tr>
-      <tr><td>1</td><td><b>Sales → Sales Orders</b></td><td>Customer and quantity. The rate fills in from the Party Price List. The ERP warns you if the customer's credit limit would be crossed</td></tr>
-      <tr><td>2</td><td><b>Sales → Delivery Challans</b></td><td>Pick the sales order; pending quantity fills in. Choose lot <b>L-0001</b> and the rolls sent. Stock leaves the Finished Goods Store</td></tr>
-      <tr><td>3</td><td><b>Sales → Invoices</b></td><td>Pick the challan; everything fills in. GST is worked out automatically (CGST + SGST or IGST). Click <b>Print</b> for the tax invoice</td></tr>
-      <tr><td>4</td><td><b>Customers → Payment Receipts</b></td><td>When the customer pays: amount, mode (bank, UPI, cheque) and reference number</td></tr>
+      <tr><td>1</td><td><b>Sales → Quotations</b> <span style="font-weight:400">(optional)</span></td><td>Prices offered, to a customer or to a new prospect. When the order comes, choose it on the sales order to copy its lines</td></tr>
+      <tr><td>2</td><td><b>Sales → Sales Orders</b></td><td>Customer, colour and quantity in kg, or in rolls only (the kg is then estimated at 17 kg a roll). The rate fills in from the Party Price List. The ERP warns you if the customer's credit limit would be crossed</td></tr>
+      <tr><td>3</td><td><b>Sales → Delivery Challans</b></td><td>Pick the sales order; pending quantity fills in. Choose the godown, lot <b>L-0001</b> and the kg sent: the rolls fill in at the lot's average (560 kg in 24 rolls: 70 kg = 3 rolls). Stock leaves that godown</td></tr>
+      <tr><td>4</td><td><b>Sales → Invoices</b></td><td>Pick the challan; everything fills in. GST is worked out automatically (CGST + SGST or IGST). Click <b>Print</b> for the tax invoice. The invoice list shows what is paid and the balance of each invoice</td></tr>
+      <tr><td>5</td><td><b>CRM → Payment Receipts</b></td><td>When the customer pays: amount and mode, then the details the mode asks for: cheque no., date and bank; UPI phone or ID; UTR no. Paid in two ways (₹20,000 cash + ₹30,000 bank)? List both parts in the table below; the amount adds up by itself. What is not paid stays on credit</td></tr>
     </table>
   </div>
 
   <div class="sec">
-    <h2><span class="n">C</span>Quick fixes for common messages</h2>
+    <h2><span class="n">C</span>Paying the agencies</h2>
+    <p>Every knitting, dyeing and finishing entry adds its <b>job charges</b> to that agency's account by itself. In the example, Maa Tara Knitting is owed <b>₹5,265</b> and Bengal Dyeing House <b>₹12,135</b> (₹8,775 dyeing + ₹3,360 finishing).</p>
+    <table>
+      <tr><th style="width:40%">Where</th><th>What to do</th></tr>
+      <tr><td><b>Finance &amp; Accounts → Payables</b></td><td>What you owe every supplier and agency</td></tr>
+      <tr><td><b>Finance &amp; Accounts → Party Ledger</b></td><td>One agency's charges, lot by lot, and the payments made</td></tr>
+      <tr><td><b>Finance &amp; Accounts → Supplier Payments</b></td><td>Pay the agency: pick it, its current balance shows, type the amount</td></tr>
+    </table>
+    <div class="note"><b>Labour Payments / Labour Payable</b> are only for workers in your own factory. Agencies are always paid through <b>Supplier Payments</b>.</div>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">D</span>Keeping track of the agencies</h2>
+    <p>Put an <b>expected delivery date</b> (and the expected fabric, rate, colour wanted) on the yarn issue and on Send Grey for Dyeing. Then:</p>
+    <table>
+      <tr><th style="width:40%">Where</th><th>What you see</th></tr>
+      <tr><td><b>Production → Job Work Register</b></td><td>Every send to an agency: kg sent, kg already worked, kg still there, expected date and <b>Overdue</b> when it is late. Late sends also show on the dashboard</td></tr>
+      <tr><td><b>Production → Processing Status</b></td><td>Every lot at a dyeing or finishing agency: 🟡 material sent → 🔵 processing started → 🟠 colouring → 🟣 finishing → 🟢 finished &amp; ready → ✅ received. Sent, dyed and received move by themselves</td></tr>
+      <tr><td><b>Production → Status Updates</b></td><td>When the agency tells you a step in between, record it: agency, lot, status. Or click the lot on the Processing Status page</td></tr>
+      <tr><td><b>Inventory → Yarn Stock</b></td><td>Per yarn: opening, purchased, sent to knitting, used in knitting, available in the store and lying at the knitting houses</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">E</span>Godowns</h2>
+    <table>
+      <tr><th style="width:40%">Where</th><th>What to do</th></tr>
+      <tr><td><b>Masters → Locations &amp; Godowns</b></td><td>Add each godown once, type <b>Godown</b></td></tr>
+      <tr><td><b>Finishing &amp; Packing</b></td><td><i>Finished rolls go to</i>: the godown that receives them</td></tr>
+      <tr><td><b>Inventory → Godown Transfer</b></td><td>From godown, to godown, person responsible, vehicle; the lot and the kg moved (its rolls go with it at the lot's average)</td></tr>
+      <tr><td><b>Inventory → Godown Stock</b></td><td>Which fabric is in which godown: kg and rolls side by side, and the average kg per roll</td></tr>
+      <tr><td><b>Challans and invoices</b></td><td><i>From godown</i>: the godown the goods leave</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">F</span>Customers, leads and quotations</h2>
+    <table>
+      <tr><th style="width:40%">Where</th><th>What to do</th></tr>
+      <tr><td><b>CRM → Customer Master</b></td><td>Name, mobile, address, GSTIN, credit limit, credit days and payment terms</td></tr>
+      <tr><td><b>CRM → Leads &amp; Follow-ups</b></td><td>Every enquiry: what they want, stage (new, contacted, quotation sent, negotiation, won, lost). Note each call or visit with the <b>next follow-up date</b></td></tr>
+      <tr><td><b>CRM → Follow-ups Due</b></td><td>Leads to call today, overdue first. Due follow-ups also show on the dashboard</td></tr>
+      <tr><td><b>CRM → Customer Card</b></td><td>One customer at a glance: outstanding, overdue, sales this year, invoices with paid and balance, payments, open orders, leads</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">G</span>Money: bank, cash, expenses, bills, EMIs</h2>
+    <table>
+      <tr><th style="width:40%">Where</th><th>What to do</th></tr>
+      <tr><td><b>Bank &amp; Cash Accounts</b></td><td>Add each bank account once with its opening balance. <i>Cash in Hand</i> is already there</td></tr>
+      <tr><td>Every receipt, payment, expense, salary, EMI</td><td>Choose the mode; the account fills in (cash = Cash in Hand). Change it if the money went through another bank</td></tr>
+      <tr><td><b>Payment Receipts</b> and <b>Supplier Payments</b>: the details</td><td>Each mode asks for its own: <b>Cheque</b> – cheque no. (must be filled), cheque date, bank &amp; branch. <b>UPI</b> – phone no or UPI ID, transaction ID. <b>Bank Transfer</b> – NEFT / RTGS / IMPS, UTR no, their bank (paying a supplier: also their account no &amp; IFSC). <b>Online</b> – paid through, transaction ID. <b>Cash</b> – who took or got the cash, receipt-book / voucher no</td></tr>
+      <tr><td><b>Cheques</b>: they count only once cashed</td><td>A cheque does not count until you fill in <i>Cheque cashed (cleared in bank) on</i>: the customer still owes it, the bill stays unpaid, the bank balance does not have it. When it shows in the bank statement, open the receipt or payment and fill in that date. <b>Cheques Not Cashed</b> lists every cheque still waiting; the dashboard warns about them</td></tr>
+      <tr><td>Party master: <b>Bank &amp; UPI</b></td><td>Save a party's bank, account no, IFSC and UPI ID once; they fill in by themselves on its receipts and payments</td></tr>
+      <tr><td><b>Bank Entries</b></td><td>Cash deposited, cash withdrawn, transfer between accounts, bank charges, interest</td></tr>
+      <tr><td><b>Bank &amp; Cash Book</b></td><td>The balance of every account; click one for its entries</td></tr>
+      <tr><td><b>Bank Reconciliation</b></td><td>When an entry appears in the bank statement, fill in <i>Cleared in bank on</i>. The page shows what is not yet in the bank and the balance the bank should show</td></tr>
+      <tr><td><b>Expenses</b></td><td>Transport, rent, repairs, office, phone, miscellaneous … Factory expenses tick <i>Add to production cost</i> by themselves</td></tr>
+      <tr><td><b>Electricity Bills</b></td><td>Enter the bill when it comes (month, amount, due date); fill in <i>Paid on</i> when it is paid. Do not enter it again under Expenses</td></tr>
+      <tr><td><b>Loans</b> and <b>EMI Payments</b></td><td>Each loan once (EMI, number of EMIs, first EMI date); then each EMI as it is paid. <b>EMI &amp; Loan Status</b> shows EMIs left and the next due date</td></tr>
+    </table>
+    <div class="note">The dashboard warns you about overdue invoices, EMIs and electricity bills due within a few days, late job work and follow-ups due.</div>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">H</span>Staff, attendance and salary</h2>
+    <table>
+      <tr><th style="width:40%">Where</th><th>What to do</th></tr>
+      <tr><td><b>Staff &amp; Salary → Staff</b></td><td>Name, department, designation, mobile, joining date; salary a month (or wage a day)</td></tr>
+      <tr><td><b>Attendance</b></td><td>Once a day: everyone is listed as present; change only those absent, on half day, on leave or off</td></tr>
+      <tr><td><b>Salary &amp; Advances</b></td><td>Pick the employee and the month: the salary due from the attendance shows and fills the amount. Give advances here too; recover them in <i>Advance recovered</i> on a later salary</td></tr>
+      <tr><td><b>Salary Register</b>, <b>Attendance Sheet</b></td><td>The month for everyone: days, salary due, paid, balance, advances; and the day-by-day attendance</td></tr>
+    </table>
+    <div class="note">Only logins allowed to see salaries see the pay; others (for example a godown supervisor marking attendance) see the staff without it.</div>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">I</span>GST reports, approvals and the activity log</h2>
+    <table>
+      <tr><th style="width:40%">Where</th><th>What you see</th></tr>
+      <tr><td><b>GST Reports</b></td><td>GST summary, sales register, purchase register, GSTR-1 data (B2B, B2C, HSN summary), GSTR-3B summary, party GSTINs. Your accountant should check them before filing</td></tr>
+      <tr><td><b>Admin → Approvals</b></td><td>When approval is on (Settings), a change or deletion of a saved entry by staff waits here until the administrator approves it. Staff can still correct their own entries the same day</td></tr>
+      <tr><td><b>Admin → Activity Log</b></td><td>Who signed in, and who created, changed, deleted or approved what, and when</td></tr>
+    </table>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">J</span>Quick fixes for common messages</h2>
     <table>
       <tr><th style="width:36%">You see</th><th style="width:30%">Why</th><th>Do this</th></tr>
       <tr><td>"no stock here" in <b>Yarn Issue</b></td><td>The yarn was never received</td><td>Do the <b>GRN</b> (step 2), or Opening Stock</td></tr>
-      <tr><td>"no stock here" in <b>Knitting</b></td><td>Yarn not issued to the knitting factory</td><td>Do the <b>Yarn Issue</b> (step 4)</td></tr>
-      <tr><td>Lot missing in <b>Dyeing</b></td><td>The knitting entry is not saved yet, or "Grey fabric goes to" was set to Knitting Factory</td><td>Save the <b>Knitting</b> entry (step 5); for fabric held at the knitting unit use <b>Inventory → Transfer to Color Factory</b></td></tr>
-      <tr><td>Chemicals show "no stock" in Dyeing</td><td>Dyes and chemicals never received</td><td>Buy them with a <b>GRN</b> into the Main Store</td></tr>
-      <tr><td>Lot missing in <b>Finishing</b></td><td>The lot has not been dyed yet</td><td>Do the <b>Dyeing</b> entry (step 6)</td></tr>
+      <tr><td>An agency is not in <b>Agency / unit</b></td><td>Its party record does not tick that work</td><td><b>Masters → Parties</b>: open the agency and tick the work</td></tr>
+      <tr><td>"no stock here" in <b>Knitting</b></td><td>No yarn was issued to that agency</td><td>Do the <b>Yarn Issue</b> to that agency (step 4)</td></tr>
+      <tr><td>Lot missing in <b>Dyeing</b></td><td>The knitting entry is not saved yet, or its grey fabric was sent to another agency or kept at the knitter</td><td>Check the agency chosen. To move fabric use <b>Inventory → Send Grey for Dyeing</b></td></tr>
+      <tr><td>Chemicals show "no stock" in Dyeing</td><td>You chose to supply chemicals, but none were received</td><td>Buy them with a <b>GRN</b> into the Main Store, or leave the table empty if the agency uses its own</td></tr>
+      <tr><td>Lot missing in <b>Finishing</b></td><td>The lot has not been dyed yet, or the dyed fabric was sent to another agency</td><td>Do the <b>Dyeing</b> entry (step 6), or check the agency chosen</td></tr>
       <tr><td>An item is missing from a list</td><td>Wrong category in the item master</td><td><b>Masters → Items</b>: correct the category</td></tr>
       <tr><td>"Not enough stock … short by …"</td><td>You entered more than is available</td><td>Check the quantity, or the step before</td></tr>
+      <tr><td>"Sent to the administrator for approval"</td><td>Approval is on, and the entry was made by someone else or on an earlier day</td><td>Nothing: the change is made when the administrator approves it</td></tr>
       <tr><td>"No access"</td><td>Your login is not allowed on that screen</td><td>Ask the administrator to change your role</td></tr>
       <tr><td>"Too many wrong passwords"</td><td>5 wrong passwords in a row</td><td>Wait 15 minutes, then sign in again</td></tr>
     </table>
   </div>
 
   <div class="sec">
-    <h2><span class="n">D</span>Who does what</h2>
+    <h2><span class="n">K</span>Who does what</h2>
     <table>
       <tr><th style="width:26%">Login</th><th>Works on</th></tr>
       <tr><td><b>Purchase</b></td><td>Masters, purchase orders, purchase bills</td></tr>
-      <tr><td><b>Store / Inventory</b></td><td>Goods receipts (GRN), yarn issue to knitting, opening stock</td></tr>
-      <tr><td><b>Knitting</b></td><td>Knitting entries (the grey fabric goes to the Color Factory by itself)</td></tr>
-      <tr><td><b>Dyeing / Color</b></td><td>Dyeing entries</td></tr>
-      <tr><td><b>Finishing &amp; Packing</b></td><td>Finishing entries</td></tr>
-      <tr><td><b>Sales</b></td><td>Customers, price list, sales orders, challans, invoices</td></tr>
-      <tr><td><b>Finance &amp; Accounts</b></td><td>Purchase bills, supplier payments, customer receipts, overheads, reports</td></tr>
-      <tr><td><b>Management / Admin</b></td><td>Everything, including the business dashboard. Admin also manages users and settings</td></tr>
+      <tr><td><b>Store / Inventory</b></td><td>Goods receipts (GRN), yarn issue to the knitting agencies, godown transfers, opening stock</td></tr>
+      <tr><td><b>Knitting</b></td><td>Knitting entries for each agency's delivery (the grey fabric goes to the dyeing agency chosen on the entry); send grey for dyeing; status updates</td></tr>
+      <tr><td><b>Dyeing / Color</b></td><td>Dyeing entries for each dyeing agency; status updates</td></tr>
+      <tr><td><b>Finishing &amp; Packing</b></td><td>Finishing entries for each finishing agency; status updates</td></tr>
+      <tr><td><b>Sales</b></td><td>Customers, leads &amp; follow-ups, quotations, price list, sales orders, challans, invoices</td></tr>
+      <tr><td><b>Finance &amp; Accounts</b></td><td>Purchase bills, supplier and agency payments, customer receipts, bank &amp; cash, expenses, electricity bills, EMIs, staff &amp; salaries, GST reports</td></tr>
+      <tr><td><b>Management / Admin</b></td><td>Everything, including the business dashboard and its alerts. Admin also manages users, settings, approvals and the activity log</td></tr>
     </table>
+    <div class="tip"><b>Finding a choice fast:</b> every dropdown (customer, supplier, item, lot, agency, account, report filters …) is also a search box. Click it and type any part of the name, for example <i>kolk</i> or <i>jersey 30</i>: only matching choices stay. <b>↑ ↓</b> to move, <b>Enter</b> or <b>Tab</b> to pick, <b>Esc</b> to go back.</div>
     <div class="tip"><b>Saving:</b> press <b>Ctrl + S</b> or click <b>Save</b>. Your sign-in belongs to your own browser tab; close the tab or click the sign-out icon at the bottom of the menu when you leave the computer.</div>
   </div>
 </section>

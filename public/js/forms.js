@@ -1,7 +1,8 @@
 /* Generic list, form and print engine driven by SCHEMAS. */
 'use strict';
 
-const DOC_COLS = new Set(['purchaseOrders', 'grn', 'purchaseBills', 'payments', 'transfers', 'stockAdjust', 'knitting', 'dyeing', 'finishing', 'overheads', 'salesOrders', 'deliveries', 'invoices', 'receipts']);
+const DOC_COLS = new Set(['purchaseOrders', 'grn', 'purchaseBills', 'payments', 'transfers', 'stockAdjust', 'knitting', 'dyeing', 'finishing', 'overheads', 'salesOrders', 'deliveries', 'invoices', 'receipts',
+  'leads', 'quotations', 'jobStatus', 'bankEntries', 'attendance', 'salary', 'emiPayments', 'powerBills', 'labourPayments']);
 const BASE_REFS = ['items', 'units', 'parties', 'locations', 'machines', 'processes', 'boms', 'priceList'];
 
 function refsFor(s) {
@@ -31,9 +32,12 @@ function displayValue(f, v) {
   if (f.type === 'check') return v ? 'Yes' : 'No';
   if (f.type === 'select' && f.options) { const o = (typeof f.options === 'function' ? f.options({}) : f.options).find(x => Array.isArray(x) && x[0] === v); if (o) return o[1]; }
   if (f.type === 'date') return U.fmtDate(v);
+  if (f.type === 'month') return U.fmtMonth(v);
   if (f.fmt) return U.fmt(f.fmt, v);
   return String(v);
 }
+// Fields and blocks with `show` appear only when it says so (e.g. "To account" only for transfers).
+const shown = (f, doc) => !f.show || f.show(doc);
 
 /* ================================================================== */
 /* LIST                                                                */
@@ -41,7 +45,7 @@ function displayValue(f, v) {
 
 function listColumns(s) {
   const find = k => s.fields.find(f => f.k === k) || { k, label: k };
-  let cols = s.listCols;
+  let cols = typeof s.listCols === 'function' ? s.listCols() : s.listCols;
   if (!cols) {
     cols = s.fields.filter(f => f.list).map(f => f.k);
     if (s.isDoc) cols = ['no', 'date'].concat(cols.filter(k => k !== 'no' && k !== 'date'));
@@ -58,7 +62,7 @@ async function renderList(main, key, query) {
   if (!s) return renderNotFound(main);
   if (!Perm.can(s.area, 'view')) return renderDenied(main);
   Cache.invalidate(s.col);
-  await Cache.load(refsFor(s));
+  await Promise.all([Cache.load(refsFor(s)), s.listExtra ? API.report(s.listExtra).then(r => { Extra[s.listExtra] = r; }, () => { Extra[s.listExtra] = {}; }) : null]);
   const all = Cache.list(s.col).filter(r => !s.where || s.where(r));
   const cols = listColumns(s);
   const state = { q: query.q || '', from: query.from || '', to: query.to || '', f: query.f || '', limit: 200, sortK: null, sortDir: 1 };
@@ -115,7 +119,7 @@ async function renderList(main, key, query) {
 /* FORM                                                                */
 /* ================================================================== */
 
-async function renderForm(main, key, id) {
+async function renderForm(main, key, id, query) {
   const s = SCHEMAS[key];
   if (!s) return renderNotFound(main);
   const isNew = id === 'new';
@@ -128,6 +132,8 @@ async function renderForm(main, key, id) {
     Object.assign(doc, s.fixed || {});
     for (const g of s.grids) doc[g.k] = [{}];
     if (s.onNew) await s.onNew(doc);
+    // A link can open a new entry with some fields filled (e.g. a status update for a lot).
+    for (const [k, v] of Object.entries(query || {})) if (s.fields.some(f => f.k === k && f.type !== 'calc') && !(s.fixed && k in s.fixed)) doc[k] = v;
   } else {
     doc = JSON.parse(JSON.stringify(await API.get('/api/' + s.col + '/' + id)));
     doc._wastageQtyTouched = true; doc._labourTouched = true;
@@ -136,17 +142,21 @@ async function renderForm(main, key, id) {
     for (const g of s.grids) if (!Array.isArray(doc[g.k]) || !doc[g.k].length) doc[g.k] = [{}];
   }
   const original = isNew ? null : JSON.parse(JSON.stringify(doc));
-  const hasLots = s.fields.some(f => f.type === 'lot') || s.grids.some(g => g.cols.some(c => c.type === 'lot')) || Guide.usesStock(key);
+  const hasLots = s.stock || s.fields.some(f => f.type === 'lot') || s.grids.some(g => g.cols.some(c => c.type === 'lot')) || Guide.usesStock(key);
   const stock = new Map();
   if (hasLots) {
     const r = await API.report('stockChoices');
     for (const x of r.rows) { const k = x.loc + '|' + x.item; if (!stock.has(k)) stock.set(k, []); stock.get(k).push(x); }
     // When editing, give back what this document itself consumed so its own lots remain selectable.
     if (original) {
-      const give = (loc, item, lot, qty) => { const k = loc + '|' + item; if (!stock.has(k)) stock.set(k, []); const arr = stock.get(k); const e = arr.find(x => x.lot === (lot || '')); if (e) e.qty = S.r3(e.qty + qty); else arr.push({ loc, item, lot: lot || '', qty }); };
+      const give = (loc, item, lot, qty, rolls) => {
+        const k = loc + '|' + item; if (!stock.has(k)) stock.set(k, []);
+        const arr = stock.get(k); const e = arr.find(x => x.lot === (lot || ''));
+        if (e) { e.qty = S.r3(e.qty + qty); e.rolls = (e.rolls || 0) + (rolls || 0); } else arr.push({ loc, item, lot: lot || '', qty, rolls: rolls || 0 });
+      };
       for (const f of s.fields) if (f.type === 'lot') give(f.loc(original), original[f.itemKey], original[f.k], S.num(original.inQty));
       for (const g of s.grids) for (const c of g.cols) if (c.type === 'lot') for (const r of original[g.k] || []) {
-        give(c.loc(original, r), r.item, r.lot, c.signed ? -S.num(r.qty) : S.num(r.qty)); // signed: + lines added stock, - lines took it
+        give(c.loc(original, r), r.item, r.lot, c.signed ? -S.num(r.qty) : S.num(r.qty), (r.rollPick || []).length ? 0 : c.signed ? -S.num(r.rolls) : S.num(r.rolls)); // signed: + lines added stock, - lines took it
         // ...and the rolls it took, so they can be picked again
         const e = (r.rollPick || []).length ? stock.get(c.loc(original, r) + '|' + r.item).find(x => x.lot === (r.lot || '')) : null;
         if (e) { e.bag = e.bag || []; for (const p of r.rollPick) { const b = e.bag.find(x => x.no === p.no); if (b) b.kg = S.r3(b.kg + p.kg); else e.bag.push({ no: p.no, kg: p.kg }); } }
@@ -177,10 +187,20 @@ async function renderForm(main, key, id) {
     // Weighed rolls of a lot that can still be sent: [{ no, kg }] in roll order.
     bag(loc, item, lot) { const e = (stock.get(loc + '|' + item) || []).find(x => x.lot === (lot || '')); return e && e.bag ? e.bag.filter(r => r.kg > 0.0005).sort((a, b) => a.no - b.no) : []; },
     // When the lot or kg of a line changes, take its weighed rolls in roll order (whole rolls, last one cut).
+    // Lots whose rolls were only counted: the rolls follow the kg at the lot's average, until a count is typed;
+    // a count typed with no kg gives the kg at that average.
     autoRolls(row, loc) {
       const bag = ctx.bag(loc, row.item, row.lot);
       const sig = row.item + '|' + row.lot + '|' + S.num(row.qty);
-      if (!bag.length) { delete row.rollPick; return; }
+      if (!bag.length) {
+        delete row.rollPick;
+        const e = ctx.lots(loc, row.item).find(x => x.lot === (row.lot || ''));
+        if (!S.num(row.qty) && S.num(row.rolls) > 0) {
+          const per = e && e.rolls > 0 && e.qty > 0 ? e.qty / e.rolls : S.num((Cache.settings || {}).rollKg) || 17;
+          row.qty = S.r3(Math.min(S.num(row.rolls) * per, e && e.qty > 0 ? e.qty : Infinity));
+        } else if (!row._rollsTouched) { const r = avgRolls(ctx, loc, row.item, row.lot, S.num(row.qty)); if (r !== '') row.rolls = r; }
+        return;
+      }
       if (row._rollSig === sig && row.rollPick) return;
       const a = S.allocRolls(bag, S.num(row.qty));
       row._rollSig = sig;
@@ -238,7 +258,8 @@ async function renderForm(main, key, id) {
         const r = await API.report('partyBalance', { party: doc.party });
         const p = Cache.byId('parties', doc.party) || {};
         doc._bal = r.balance;
-        doc._balText = '₹ ' + U.money(Math.abs(r.balance)) + (r.balance >= 0 ? ' Dr' : ' Cr') + (S.num(p.creditLimit) ? ' (limit ₹ ' + U.money(p.creditLimit) + ')' : '');
+        doc._balText = '₹ ' + U.money(Math.abs(r.balance)) + (r.balance >= 0 ? ' Dr' : ' Cr') + (S.num(p.creditLimit) ? ' (limit ₹ ' + U.money(p.creditLimit) + ')' : '') +
+          (S.num(r.pending) ? ' · cheques ₹ ' + U.money(r.pending) + ' not cashed yet' : '');
       } catch (e) { doc._balText = ''; }
       ctx.refresh();
     },
@@ -276,10 +297,12 @@ async function renderForm(main, key, id) {
           onchange: () => { if (f.onChange) afterChange(); } }));
       case 'date':
         return bind(h('input', { type: 'date', 'aria-label': label, value: get() || '', onchange: e => { obj[f.k] = e.target.value; afterChange(); } }));
+      case 'month':
+        return bind(h('input', { type: 'month', 'aria-label': label, value: get() || '', placeholder: 'YYYY-MM', onchange: e => { obj[f.k] = e.target.value; afterChange(); } }));
       case 'check':
         return h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!get(), onchange: e => { obj[f.k] = e.target.checked; afterChange(); } }), ' ', f.label);
       case 'select': {
-        const opts = (typeof f.options === 'function' ? f.options(doc) : f.options).map(o => Array.isArray(o) ? o : [o, o]);
+        const opts = (typeof f.options === 'function' ? f.options(doc, ctx) : f.options).map(o => Array.isArray(o) ? o : [o, o]);
         return bind(h('select', { 'aria-label': label, onchange: e => { obj[f.k] = e.target.value; afterChange(); } },
           h('option', { value: '' }, '—'), opts.map(([v, l]) => h('option', { value: v, selected: v === get() }, l))));
       }
@@ -318,7 +341,7 @@ async function renderForm(main, key, id) {
         const blank = item && f.blank ? f.blank(obj) : null; // what an empty choice means here, e.g. "new lot (auto)"
         return bind(h('select', { 'aria-label': label, onchange: e => { obj[f.k] = e.target.value; afterChange(); } },
           h('option', { value: '' }, !item ? 'pick item first' : blank || (opts.length ? (opts.some(x => x.lot === '') ? '— no lot —' : '— select lot —') : 'no stock here')),
-          opts.filter(x => x.lot !== '').map(x => h('option', { value: x.lot, selected: x.lot === cur }, x.lot + ' — ' + U.qty(x.qty) + ' ' + u + (x.bag ? ' · ' + x.bag.length + ' roll' + (x.bag.length === 1 ? '' : 's') : ''))),
+          opts.filter(x => x.lot !== '').map(x => h('option', { value: x.lot, selected: x.lot === cur }, x.lot + ' — ' + U.qty(x.qty) + ' ' + u + (x.rolls > 0 ? ' · ' + x.rolls + ' roll' + (x.rolls === 1 ? '' : 's') + (x.bag ? '' : ' (avg ' + U.qty(S.r2(x.qty / x.rolls)) + ' kg)') : ''))),
           opts.filter(x => x.lot === '').map(x => h('option', { value: '', selected: cur === '' }, '(no lot) — ' + U.qty(x.qty) + ' ' + u))));
       }
       case 'rolls': {
@@ -343,13 +366,14 @@ async function renderForm(main, key, id) {
   }
 
   function fieldsBlock(b) {
-    return h('div', { class: 'fields' }, b.fields.filter(f => !(s.fixed && f.k in s.fixed) || f.type === 'ro').map(f => h('div', { class: 'field w' + (f.w || 1) + (f.type === 'check' ? ' checkfield' : '') },
+    return h('div', { class: 'fields' }, b.fields.filter(f => (!(s.fixed && f.k in s.fixed) || f.type === 'ro') && shown(f, doc)).map(f => h('div', { class: 'field w' + (f.w || 1) + (f.type === 'check' ? ' checkfield' : '') },
       f.type === 'check' ? null : h('span', { class: 'lbl' }, f.label, f.req ? h('b', { class: 'req', 'aria-hidden': 'true' }, ' *') : null),
       fieldControl(f, doc, null, null, f.k),
       f.help ? h('small', { class: 'help' }, f.help) : null)));
   }
 
-  function gridBlock(g) {
+  function gridBlock(gFull) {
+    const g = Object.assign({}, gFull, { cols: gFull.cols.filter(c => shown(c, doc)) });
     const rows = doc[g.k];
     const sumCols = g.totals || [];
     // Lines that take stock get a note underneath when the stock is missing or short.
@@ -396,7 +420,7 @@ async function renderForm(main, key, id) {
   }
 
   function buildBlocks() {
-    return s.layout.map(b => {
+    return s.layout.filter(b => shown(b, doc)).map(b => {
       if (b.totals) return totalsBlock();
       if (b.grid) return h('section', { class: 'card' }, h('h3', null, b.grid.title), gridBlock(b.grid));
       return h('section', { class: 'card' }, b.title ? h('h3', null, b.title) : null, fieldsBlock(b));
@@ -405,7 +429,7 @@ async function renderForm(main, key, id) {
 
   function validateForm() {
     const missing = [];
-    for (const f of s.fields) if (f.req && isEmpty(doc[f.k]) && !(s.fixed && f.k in s.fixed)) missing.push(f.label);
+    for (const b of s.layout) for (const f of b.fields || []) if (f.req && isEmpty(doc[f.k]) && !(s.fixed && f.k in s.fixed) && shown(f, doc) && shown(b, doc)) missing.push(f.label);
     for (const g of s.grids) {
       const filled = doc[g.k].filter(r => r.item);
       filled.forEach((r) => { for (const c of g.cols) if (c.req && isEmpty(r[c.k])) missing.push(g.title + ' line ' + (doc[g.k].indexOf(r) + 1) + ': ' + c.label); });
@@ -430,6 +454,7 @@ async function renderForm(main, key, id) {
     saveBtn.disabled = true;
     try {
       const saved = isNew ? await API.post('/api/' + s.col, body) : await API.put('/api/' + s.col + '/' + doc.id, body);
+      if (saved && saved.pending) { toast(saved.message); location.hash = '#/list/' + key; return; }
       Cache.invalidate(s.col);
       if (s.col === 'parties' || s.col === 'items') Cache.invalidate();
       toast('Saved' + (saved.no ? ' ' + saved.no : ''));
@@ -441,7 +466,7 @@ async function renderForm(main, key, id) {
 
   async function remove() {
     if (!(await confirmBox('Delete this ' + s.singular.toLowerCase() + (doc.no ? ' ' + doc.no : '') + '? This cannot be undone.', 'Delete', true))) return;
-    try { await API.del('/api/' + s.col + '/' + doc.id); Cache.invalidate(s.col); toast('Deleted'); location.hash = '#/list/' + key; }
+    try { const r = await API.del('/api/' + s.col + '/' + doc.id); Cache.invalidate(s.col); toast(r && r.pending ? r.message : 'Deleted'); location.hash = '#/list/' + key; }
     catch (e) { toast(e.message, 'err'); }
   }
 
@@ -496,10 +521,12 @@ async function printDoc(s, doc) {
   const st = await Cache.getSettings();
   const esc = v => String(v === undefined || v === null ? '' : v).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const money = v => U.money(v);
-  const party = Cache.byId('parties', doc.party);
+  // Material sent to an agency prints as a job work challan, with the agency's address and GSTIN.
+  const toAgency = !doc.party && doc.toLoc ? (Cache.byId('locations', doc.toLoc) || {}).party || '' : '';
+  const party = Cache.byId('parties', doc.party || toAgency);
   const isTax = s.hasTotals;
   const isInvoice = s.col === 'invoices';
-  const title = s.printTitle || s.singular.toUpperCase();
+  const title = toAgency ? 'JOB WORK DELIVERY CHALLAN' : s.printTitle || s.singular.toUpperCase();
   const initials = (st.companyName || 'ERP').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
   const inter = isTax ? S.isInterState(st, party, doc) : false;
   const pos = doc.placeOfSupply || (party && party.state) || '';
@@ -509,13 +536,13 @@ async function printDoc(s, doc) {
   const details = [[(s.singular === 'Invoice' ? 'Invoice' : s.singular) + ' no.', doc.no || ''], ['Date', U.fmtDate(doc.date)]];
   if (isTax && pos) details.push(['Place of supply', pos + (S.stateCode(pos) ? ' (' + S.stateCode(pos) + ')' : '')]);
   for (const f of s.fields) {
-    if (['ro', 'calc', 'password'].includes(f.type) || skip.has(f.k) || isEmpty(doc[f.k]) || (s.fixed && f.k in s.fixed)) continue;
+    if (['ro', 'calc', 'password'].includes(f.type) || skip.has(f.k) || isEmpty(doc[f.k]) || (s.fixed && f.k in s.fixed) || !shown(f, doc)) continue;
     if (f.k === 'amount' && !isTax) continue; // shown in the big amount box
     details.push([f.label.replace(/ \((optional|new)\)$/, ''), displayValue(f, doc[f.k])]);
   }
   const dl = rows => '<dl class="kv">' + rows.map(([k, v]) => '<dt>' + esc(k) + '</dt><dd>' + esc(v) + '</dd>').join('') + '</dl>';
 
-  const partyLabel = (s.fields.find(f => f.k === 'party') || {}).label || 'Party';
+  const partyLabel = toAgency ? 'Sent for job work to' : (s.fields.find(f => f.k === 'party') || {}).label || 'Party';
   const partyBox = party ? '<section class="box"><h3>' + (isInvoice ? 'Billed to' : esc(partyLabel)) + '</h3>' +
     '<div class="pname">' + esc(party.name) + '</div>' +
     '<div class="addr">' + [party.address, [party.city, party.state].filter(Boolean).join(', ')].filter(Boolean).map(esc).join('<br>') + '</div>' +
@@ -525,9 +552,17 @@ async function printDoc(s, doc) {
 
   // ---- item tables: lot and HSN sit under the item name instead of extra columns
   const grids = s.grids.map(g => {
+    // Grids without items (attendance, payment parts, follow-ups) print as a plain table.
+    if (!g.cols.some(c => c.k === 'item')) {
+      const rows = (doc[g.k] || []).filter(r => g.cols.some(c => c.type !== 'calc' && !isEmpty(r[c.k])));
+      if (!rows.length) return '';
+      const num = c => !!c.fmt;
+      return '<h4>' + esc(g.title) + '</h4><table class="items"><thead><tr><th class="c">#</th>' + g.cols.map(c => '<th' + (num(c) ? ' class="n"' : '') + '>' + esc(c.label) + '</th>').join('') + '</tr></thead><tbody>' +
+        rows.map((r, i) => '<tr><td class="c">' + (i + 1) + '</td>' + g.cols.map(c => '<td' + (num(c) ? ' class="n"' : '') + '>' + esc(c.type === 'calc' ? c.value(r, doc) : displayValue(c, r[c.k])) + '</td>').join('') + '</tr>').join('') + '</tbody></table>';
+    }
     const rows = (doc[g.k] || []).filter(r => r.item);
     if (!rows.length) return '';
-    const cols = g.cols.filter(c => c.k !== 'lot' && c.k !== 'item');
+    const cols = g.cols.filter(c => c.k !== 'lot' && c.k !== 'item' && shown(c, doc));
     const numeric = c => !!c.fmt || c.type === 'number' || c.k === 'gst';
     const cell = (c, r) => {
       if (c.type === 'calc') { const v = c.value(r, doc); return c.fmt ? U.fmt(c.fmt, v) : esc(v); }
@@ -673,6 +708,7 @@ async function printDoc(s, doc) {
     (notes ? '<div class="notes">' + notes + '</div>' : '') +
     '<footer><div class="terms">' + (isInvoice && st.invoiceTerms ? '<b>Terms &amp; conditions</b><br>' + esc(st.invoiceTerms) : '') +
     (s.col === 'deliveries' ? '<div class="recv"><div>Received the above goods in good condition.</div><div class="line">Receiver&#39;s signature &amp; stamp</div></div>' : '') +
+    (toAgency ? '<div class="recv"><div>Received the above goods for job work; they remain our property.</div><div class="line">Agency&#39;s signature &amp; stamp</div></div>' : '') +
     (s.col === 'labourPayments' ? '<div class="recv"><div>Received the above amount.</div><div class="line">Receiver&#39;s signature</div></div>' : '') + '</div>' +
     '<div class="sign"><div class="for">For ' + esc(st.companyName) + '</div><div class="line">Authorised signatory</div></div>' +
     '<div class="comp">This is a computer-generated document' + (isInvoice ? '. Thank you for your business.' : '.') + '</div></footer>' +

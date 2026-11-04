@@ -31,6 +31,9 @@ const U = {
   today() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); },
   monthStart() { return U.today().slice(0, 8) + '01'; },
   fmtDate(s) { if (!s || !/^\d{4}-\d{2}-\d{2}/.test(s)) return s || ''; const [y, m, d] = s.slice(0, 10).split('-'); return d + '-' + m + '-' + y; },
+  fmtMonth(s) { const m = /^(\d{4})-(\d{2})$/.exec(s || ''); return m ? ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+m[2] - 1] + ' ' + m[1] : s || ''; },
+  fmtDateTime(s) { const d = new Date(s); return isNaN(d) ? s || '' : U.fmtDate(U.isoDay(d)) + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); },
+  isoDay(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); },
   money(n) { return (+n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); },
   rupee(n) { return '₹ ' + U.money(n); },
   compact(n) {
@@ -50,6 +53,8 @@ const U = {
       case 'int': return U.int(v);
       case 'pct': return U.pct(v);
       case 'date': return U.fmtDate(v);
+      case 'month': return U.fmtMonth(v);
+      case 'datetime': return U.fmtDateTime(v);
       default: return String(v);
     }
   },
@@ -214,6 +219,11 @@ function modal(title, body, buttons) {
   });
 }
 const confirmBox = (msg, okLabel, danger) => modal('Please confirm', h('p', null, msg), [{ label: 'Cancel', value: false }, { label: okLabel || 'OK', value: true, primary: !danger, danger: !!danger }]);
+// Asks for a line of text. Resolves to the text, or null when cancelled.
+const promptBox = async (title, value) => {
+  const inp = h('input', { type: 'text', value: value || '', 'aria-label': title, style: { width: '100%' } });
+  return (await modal(title, inp, [{ label: 'Cancel', value: false }, { label: 'OK', value: true, primary: true }])) ? inp.value.trim() : null;
+};
 
 /* ---------- theme (dark by default, remembered per browser) ---------- */
 const Theme = {
@@ -303,3 +313,158 @@ function icon(name, size) {
   svg.appendChild(p);
   return svg;
 }
+
+/* ------------------------------------------------------------------ */
+/* Searchable dropdowns                                                */
+/* ------------------------------------------------------------------ */
+// Every dropdown on every page is a box you can type in: the list shows the choices containing all the
+// words typed, in any order. Arrow keys move, Enter or Tab picks, Esc goes back. The <select> stays
+// underneath, hidden, and holds the value, so forms, filters and their change handlers work as before.
+// A select can opt out with data-plain (the permission table does: four fixed levels, colour-coded).
+const Combo = (() => {
+  const VALUE = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+  const INDEX = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex');
+  const MAX = 300; // choices drawn at once; typing narrows the rest
+  let seq = 0, open = null; // the combo whose list is showing
+
+  function enhance(sel) {
+    if (sel.dataset.combo || sel.multiple || sel.size > 1 || 'plain' in sel.dataset || sel.classList.contains('perm-sel')) return;
+    sel.dataset.combo = '1';
+    const wrap = document.createElement('div');
+    wrap.className = 'combo';
+    const input = document.createElement('input');
+    Object.assign(input, { type: 'text', className: 'combo-input', autocomplete: 'off', spellcheck: false });
+    input.setAttribute('role', 'combobox'); input.setAttribute('aria-autocomplete', 'list'); input.setAttribute('aria-expanded', 'false');
+    const lab = sel.closest('label'), cap = lab && lab.firstElementChild !== sel && !lab.firstElementChild.contains(sel) ? lab.firstElementChild.textContent : '';
+    input.setAttribute('aria-label', sel.getAttribute('aria-label') || cap);
+    // forms find the field that had the focus by its path after redrawing
+    if (sel.dataset.path) input.dataset.path = sel.dataset.path;
+    const focused = document.activeElement === sel; // moving the select below loses its focus
+    sel.before(wrap);
+    wrap.append(sel, input); // the select first: code looking for "select, input" still finds it
+    sel.tabIndex = -1; sel.setAttribute('aria-hidden', 'true');
+    const c = { sel, input, list: null, items: [], hi: 0, typed: false };
+    // the box shows the chosen option, except while you are typing in it
+    c.show = () => {
+      input.disabled = sel.disabled;
+      if (open === c && document.activeElement === input) return;
+      const o = sel.options[INDEX.get.call(sel)];
+      input.value = o ? o.textContent : ''; input.title = input.value;
+    };
+    // values set by code (form refresh, filters) show at once
+    Object.defineProperty(sel, 'value', { configurable: true, get() { return VALUE.get.call(this); }, set(v) { VALUE.set.call(this, v); c.show(); } });
+    Object.defineProperty(sel, 'selectedIndex', { configurable: true, get() { return INDEX.get.call(this); }, set(v) { INDEX.set.call(this, v); c.show(); } });
+    sel.addEventListener('change', c.show);
+    sel.addEventListener('focus', () => input.focus());
+    input.addEventListener('mousedown', () => { if (open === c) close(); else setTimeout(() => list(c, ''), 0); });
+    input.addEventListener('focus', () => { c.typed = false; input.select(); });
+    input.addEventListener('input', () => { c.typed = true; list(c, input.value); });
+    input.addEventListener('keydown', e => key(c, e));
+    input.addEventListener('blur', () => { if (open === c) close(); c.show(); });
+    c.show();
+    sel._combo = c;
+    if (focused) input.focus();
+  }
+
+  function list(c, q) {
+    if (c.sel.disabled) return;
+    if (open && open !== c) close();
+    if (!c.list) {
+      c.list = document.createElement('div');
+      c.list.className = 'combo-list'; c.list.id = 'combo-' + (++seq); c.list.setAttribute('role', 'listbox');
+      c.list.addEventListener('mousedown', e => e.preventDefault()); // keep the focus in the box
+      c.list.addEventListener('click', e => { const it = e.target.closest('[data-n]'); if (it) pick(c, +it.dataset.n); });
+      c.input.setAttribute('aria-controls', c.list.id);
+    }
+    const terms = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+    const cur = INDEX.get.call(c.sel);
+    c.items = [...c.sel.options].map((o, i) => ({ o, i, t: o.textContent }))
+      .filter(x => !x.o.disabled && (!terms.length || (x.o.value !== '' && terms.every(t => x.t.toLowerCase().includes(t)))));
+    c.hi = terms.length ? 0 : Math.max(0, c.items.findIndex(x => x.i === cur));
+    const rows = c.items.slice(0, MAX).map((x, n) => {
+      const d = document.createElement('div');
+      d.className = 'combo-opt' + (x.i === cur ? ' sel' : '');
+      d.dataset.n = n; d.id = c.list.id + '-' + n; d.setAttribute('role', 'option'); d.setAttribute('aria-selected', String(x.i === cur));
+      d.append(...mark(x.t, terms));
+      return d;
+    });
+    const note = t => { const d = document.createElement('div'); d.className = 'combo-note'; d.textContent = t; return d; };
+    if (!c.items.length) rows.push(note('Nothing matches "' + q.trim() + '"'));
+    else if (c.items.length > MAX) rows.push(note((c.items.length - MAX) + ' more: type more to narrow down'));
+    c.list.replaceChildren(...rows);
+    if (!c.list.isConnected) document.body.appendChild(c.list);
+    open = c; c.input.setAttribute('aria-expanded', 'true');
+    place(c); light(c);
+  }
+  // the typed words in bold
+  function mark(text, terms) {
+    if (!terms.length) return [text];
+    const low = text.toLowerCase(), hit = new Array(text.length).fill(false);
+    for (const t of terms) for (let i = low.indexOf(t); i >= 0; i = low.indexOf(t, i + 1)) hit.fill(true, i, i + t.length);
+    const out = [];
+    for (let i = 0; i < text.length;) {
+      let j = i; while (j < text.length && hit[j] === hit[i]) j++;
+      const s = text.slice(i, j);
+      if (hit[i]) { const b = document.createElement('b'); b.textContent = s; out.push(b); } else out.push(s);
+      i = j;
+    }
+    return out;
+  }
+  function light(c) {
+    const els = c.list.querySelectorAll('.combo-opt');
+    els.forEach((el, n) => el.classList.toggle('hi', n === c.hi));
+    const el = els[c.hi];
+    if (el) { c.input.setAttribute('aria-activedescendant', el.id); el.scrollIntoView({ block: 'nearest' }); } else c.input.removeAttribute('aria-activedescendant');
+  }
+  function place(c) {
+    const r = c.input.getBoundingClientRect(), l = c.list;
+    const w = Math.min(Math.max(r.width, 240), innerWidth - 8);
+    l.style.minWidth = Math.min(r.width, innerWidth - 8) + 'px'; l.style.maxWidth = Math.max(w, Math.min(520, innerWidth - 8)) + 'px';
+    l.style.left = Math.max(4, Math.min(r.left, innerWidth - w - 4)) + 'px';
+    const below = innerHeight - r.bottom - 8, need = Math.min(320, l.scrollHeight);
+    if (below < need && r.top > below) { l.style.top = ''; l.style.bottom = (innerHeight - r.top + 2) + 'px'; l.style.maxHeight = Math.min(320, r.top - 8) + 'px'; }
+    else { l.style.bottom = ''; l.style.top = (r.bottom + 2) + 'px'; l.style.maxHeight = Math.min(320, Math.max(120, below)) + 'px'; }
+  }
+  function close() {
+    const c = open; if (!c) return;
+    open = null;
+    if (c.list) c.list.remove();
+    c.input.setAttribute('aria-expanded', 'false'); c.input.removeAttribute('aria-activedescendant');
+  }
+  function pick(c, n) {
+    const x = c.items[n];
+    close();
+    if (!x) return c.show();
+    const changed = INDEX.get.call(c.sel) !== x.i;
+    INDEX.set.call(c.sel, x.i);
+    c.typed = false; c.show();
+    if (changed) c.sel.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function key(c, e) {
+    const isOpen = open === c;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!isOpen) return list(c, '');
+      c.hi = Math.max(0, Math.min(Math.min(c.items.length, MAX) - 1, c.hi + (e.key === 'ArrowDown' ? 1 : -1))); light(c);
+    } else if (e.key === 'Enter') {
+      if (isOpen) { e.preventDefault(); pick(c, c.hi); }
+    } else if (e.key === 'Escape') {
+      if (isOpen) { e.preventDefault(); e.stopPropagation(); close(); c.typed = false; c.show(); c.input.select(); }
+    } else if (e.key === 'Tab') {
+      if (isOpen && c.typed && c.items.length) pick(c, c.hi); else close();
+    }
+  }
+
+  // every select already on the page, and every one added later
+  const scan = root => { if (root.tagName === 'SELECT') enhance(root); else if (root.querySelectorAll) root.querySelectorAll('select').forEach(enhance); };
+  new MutationObserver(muts => {
+    for (const m of muts) {
+      if (m.type === 'attributes') { if (m.target._combo) m.target._combo.show(); continue; }
+      m.addedNodes.forEach(scan);
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+  if (document.body) scan(document.body);
+  addEventListener('resize', () => { if (open) place(open); });
+  document.addEventListener('scroll', e => { if (open && !open.list.contains(e.target)) place(open); }, true);
+  return { enhance };
+})();

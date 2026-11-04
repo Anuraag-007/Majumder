@@ -119,6 +119,8 @@ async function openNew(key) { const h = await go('#/edit/' + key + '/new'); if (
 const fill = (label, val) => ev(`T.fill(${J(label)}, ${J(String(val))})`).then(r => sleep(120).then(() => r));
 const grid = (gi, row, col, val) => ev(`T.grid(${gi}, ${row}, ${J(col)}${val === undefined ? '' : ', ' + J(String(val))})`).then(r => sleep(100).then(() => r));
 const get = label => ev(`T.get(${J(label)})`);
+const getText = label => ev(`(() => { const s = T.field(${J(label)}).querySelector('select'); return s.selectedOptions[0] ? s.selectedOptions[0].textContent : ''; })()`);
+const tick = label => ev(`(() => { const l = [...document.querySelectorAll('.form label.check')].find(x => x.textContent.trim().startsWith(${J(label)})); if (!l) throw new Error('No tick box ' + ${J(label)}); const i = l.querySelector('input'); if (!i.checked) i.click(); return true; })()`).then(r => sleep(120).then(() => r));
 async function addLine(gi) { await ev(`T.addLine(${gi || 0})`); await sleep(120); }
 async function save(confirmLabel) {
   await ev(`document.getElementById('toasts').innerHTML = ''`);
@@ -239,6 +241,11 @@ async function run() {
   begin('1. Administrator: create one login per department');
   await step('admin signs in with default password', () => login('admin', 'admin123'));
   await step('9 ready-made department roles exist', async () => { const r = await api('/api/roles'); return r.length === 9 ? r.map(x => x.name).join(', ') : false; });
+  await step('this walkthrough weighs every finished roll: Settings → rolls weighed one by one', async () => {
+    const r = await ev(`fetch('/api/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + API.token }, body: JSON.stringify({ weighRolls: true }) }).then(r => r.json())`);
+    await ev('Cache.getSettings(true)');
+    return r.weighRolls === true;
+  });
   for (const [u, roleName] of USERS) {
     await step('create user ' + u + ' (' + roleName + ')', async () => {
       await openNew('users');
@@ -270,6 +277,21 @@ async function run() {
   }
   await step('duplicate item name is refused', async () => { await openNew('items'); await fill('Item name', 'cotton yarn 30s'); await fill('Category', 'Yarn'); await fill('Unit', 'Kg - '); return saveExpectError(); });
   await step('add supplier Shree Mills', async () => { await openNew('parties'); await fill('Party name', 'Shree Mills'); await fill('Type', 'Supplier'); await fill('State', 'West Bengal'); return save(); });
+  await step('add knitting agency Maa Tara Knitting: Job Worker, does knitting at ₹9/kg', async () => {
+    await openNew('parties'); await fill('Party name', 'Maa Tara Knitting'); await fill('Type', 'Job Worker'); await fill('State', 'West Bengal');
+    await tick('Does knitting'); await fill('Knitting rate (₹/kg)', 9);
+    await shot('02-agency');
+    return save();
+  });
+  await step('add Bengal Dyeing House: dyes at ₹15/kg and also finishes & packs at ₹6/kg', async () => {
+    await openNew('parties'); await fill('Party name', 'Bengal Dyeing House'); await fill('Type', 'Job Worker'); await fill('State', 'West Bengal');
+    await tick('Does dyeing'); await fill('Dyeing rate (₹/kg)', 15); await tick('Does finishing'); await fill('Finishing rate (₹/kg)', 6);
+    return save();
+  });
+  await step('each agency gets a stock location of its own', async () => {
+    const n = (await api('/api/locations')).filter(x => x.party).map(x => x.name).sort().join(', ');
+    return n === 'Bengal Dyeing House, Maa Tara Knitting' ? n : false;
+  });
   await step('add dye recipe (BOM): Red = 0.02 kg dye + 0.1 kg soda per kg', async () => {
     await openNew('boms');
     await fill('Recipe name', 'Red Recipe'); await fill('Stage', 'Dyeing');
@@ -316,13 +338,27 @@ async function run() {
   await step('Main Store now holds 1000 kg yarn in lot L-0001, numbered by the GRN', async () => { const s = await api('/api/report/stock?location=STORE'); const y = s.rows.find(r => r.item === 'Cotton Yarn 30s'); return y && y.qty === 1000 && y.lot === 'L-0001' && y.value === 250000; });
   await step('issuing 2000 kg yarn (more than stock) is refused', async () => {
     await openNew('yarnIssue');
+    await fill('Knitting agency', 'Maa Tara Knitting');
     await grid(0, 0, 'Item', 'Y30'); await grid(0, 0, 'Yarn lot', 'L-0001'); await grid(0, 0, 'Qty', 2000);
     return saveExpectError();
   });
-  await step('issue 600 kg yarn lot L-0001 to Knitting Factory', async () => {
+  await step('issue 600 kg yarn lot L-0001 to the knitting agency Maa Tara Knitting', async () => {
     await openNew('yarnIssue');
+    await fill('Knitting agency', 'Maa Tara Knitting');
     await grid(0, 0, 'Item', 'Y30'); await grid(0, 0, 'Yarn lot', 'L-0001'); await grid(0, 0, 'Qty', 600);
     return save();
+  });
+  await step('Maa Tara Knitting now holds the 600 kg of lot L-0001', async () => {
+    const y = (await api('/api/report/stock')).rows.filter(r => r.location === 'Maa Tara Knitting');
+    return y.length === 1 && y[0].lot === 'L-0001' && y[0].qty === 600 ? 'yes' : JSON.stringify(y);
+  });
+  await step('the yarn issue prints as a job work delivery challan addressed to the agency', async () => {
+    const t = (await api('/api/transfers')).find(x => x.purpose === 'Yarn Issue');
+    await go('#/edit/yarnIssue/' + t.id);
+    await ev(`window.__printed = ''; window.open = () => ({ document: { open() {}, write(h) { window.__printed += h; }, close() {} } }); T.btn('Print')`);
+    await waitFor(`!!window.__printed`);
+    const html = await ev('window.__printed');
+    return /JOB WORK DELIVERY CHALLAN/.test(html) && /Sent for job work to/.test(html) && /Maa Tara Knitting/.test(html) && /L-0001/.test(html) ? 'printed' : false;
   });
   await checkAccess('store');
 
@@ -344,13 +380,13 @@ async function run() {
     await fill('Supplier', 'Shree Mills');
     await waitFor(`/Cr/.test(T.get('Current balance'))`);
     const bal = await get('Current balance');
-    await fill('Amount (₹)', 100000); await fill('Mode', 'Bank Transfer'); await fill('Cheque / UTR no', 'NEFT-1');
+    await fill('Amount (₹)', 100000); await fill('Mode', 'Bank Transfer'); await fill('NEFT / RTGS / IMPS', 'NEFT'); await fill('UTR no', 'SBIN52026110300001');
     await save();
     return 'balance was ' + bal;
   });
 
   /* ---- Knitting ---- */
-  begin('6. Knitting Department: knitting; grey fabric goes straight to the Color Factory');
+  begin('6. Knitting Department: knitting at the agency; grey fabric goes straight to the dyeing agency');
   await step('signs in', () => login('knitting1', PASS));
   await step('home page shows knitting analytics only, with no money figures', async () => {
     await waitFor(`!!document.querySelector('.dept-section') || !!document.querySelector('.banner.err')`);
@@ -358,55 +394,61 @@ async function run() {
     if (r.sections.join() !== 'Knitting' || !r.charts || r.rupee || r.hero) throw new Error(JSON.stringify(r));
     return r.sections.join();
   });
-  await step('new knitting entry: lot no will come from the yarn; labour rate ₹8/kg', async () => {
+  await step('new knitting entry says where the yarn is; choosing Maa Tara Knitting fills its own rate ₹9/kg', async () => {
     await openNew('knitting');
-    const lot = await get('Lot no'), rate = await get('Labour rate (₹/kg)');
-    if (lot !== 'from the yarn lot' || rate !== '8') throw new Error('lot no "' + lot + '", rate ' + rate);
-    return lot;
+    const t = await guideText();
+    if (!/Choose the knitting agency\. Yarn issued to agencies: Maa Tara Knitting \(L-0001 600 Kg\)/.test(t)) throw new Error('guide: ' + t);
+    const r0 = await get('Job rate (₹/kg)');
+    await fill('Agency / unit', 'Maa Tara Knitting');
+    const lot = await get('Lot no'), rate = await get('Job rate (₹/kg)');
+    if (lot !== 'from the yarn lot' || r0 !== '8' || rate !== '9') throw new Error('lot no "' + lot + '", rate ' + r0 + ' then ' + rate);
+    return 'process rate ' + r0 + ' → agency rate ' + rate;
   });
-  await step('600 kg yarn → 585 kg grey; wastage (15 kg) and labour (₹4,680) fill in automatically', async () => {
+  await step('600 kg yarn → 585 kg grey; wastage (15 kg) and job charges (₹5,265) fill in; grey sent to Bengal Dyeing House', async () => {
     await grid(0, 0, 'Item', 'Y30'); await grid(0, 0, 'Yarn lot', 'L-0001'); await grid(0, 0, 'Qty', 600);
     const lot = await get('Lot no'); if (lot !== 'L-0001') throw new Error('lot no shows ' + lot + ', not the yarn lot');
     await fill('Grey fabric produced', 'GSJ'); await fill('Output qty (kg)', 585); await fill('Rolls', 25); await fill('GSM', 160);
-    const w = await get('Wastage qty (kg)'), l = await get('Labour amount (₹)');
-    if (w !== '15' || l !== '4680') throw new Error('wastage ' + w + ', labour ' + l);
-    const to = await get('Grey fabric goes to');
-    if (to !== 'DYE') throw new Error('grey fabric destination defaults to ' + to);
+    const w = await get('Wastage qty (kg)'), l = await get('Job charges (₹)');
+    if (w !== '15' || l !== '5265') throw new Error('wastage ' + w + ', charges ' + l);
+    await fill('Grey fabric sent to', 'Bengal Dyeing House');
     await shot('06-knitting');
     return save();
   });
-  await step('grey lot L-0001 (585 kg, 25 rolls) is at the Color Factory straight away, with no transfer entry', async () => {
+  await step('grey lot L-0001 (585 kg, 25 rolls) is at Bengal Dyeing House straight away, with no transfer entry', async () => {
     const s = (await api('/api/report/stock')).rows.filter(r => r.category === 'Grey Fabric');
     const transfers = (await api('/api/transfers')).length;
     const g = s.find(r => r.lot === 'L-0001');
-    if (!g || g.location !== 'Color Factory' || g.qty !== 585 || g.rolls !== 25 || s.some(r => r.location === 'Knitting Factory') || transfers !== 0) throw new Error(JSON.stringify({ s, transfers }));
+    if (!g || g.location !== 'Bengal Dyeing House' || g.qty !== 585 || g.rolls !== 25 || s.some(r => r.location === 'Maa Tara Knitting') || transfers !== 0) throw new Error(JSON.stringify({ s, transfers }));
     return g.location;
   });
   await checkAccess('knitting');
 
   /* ---- Dyeing ---- */
-  begin('7. Dyeing / Color Department: dyeing batch');
+  begin('7. Dyeing / Color Department: dyeing batch at the agency');
   await step('signs in', () => login('dyeing1', PASS));
-  await step('picking lot L-0001 fills 585 kg; Red recipe fills 11.7 kg dye + 58.5 kg soda', async () => {
+  await step('choosing Bengal Dyeing House keeps the dyed fabric there to finish; lot L-0001 fills 585 kg; Red recipe fills 11.7 kg dye + 58.5 kg soda', async () => {
     await openNew('dyeing');
+    await fill('Agency / unit', 'Bengal Dyeing House');
+    const to = await getText('Dyed fabric sent to');
     await fill('Grey fabric', 'GSJ'); await fill('Lot no', 'L-0001');
     const q = await get('Input qty (kg)');
     await fill('Dye recipe (BOM)', 'Red Recipe');
     const a = await grid(0, 0, 'Qty'), b = await grid(0, 1, 'Qty');
-    if (q !== '585' || a !== '11.7' || b !== '58.5') throw new Error('input ' + q + ', dye ' + a + ', soda ' + b);
+    if (to !== 'Bengal Dyeing House' || q !== '585' || a !== '11.7' || b !== '58.5') throw new Error('sent to ' + to + ', input ' + q + ', dye ' + a + ', soda ' + b);
     return 'ok';
   });
-  await step('585 kg grey → 570 kg red; wastage 15 kg, labour ₹8,775 (585 × 15)', async () => {
+  await step('585 kg grey → 570 kg red; wastage 15 kg, job charges ₹8,775 (585 × 15)', async () => {
     await fill('Color', 'Red'); await fill('Colored fabric produced', 'CSJ'); await fill('Output qty (kg)', 570);
-    const w = await get('Wastage qty (kg)'), l = await get('Labour amount (₹)');
-    if (w !== '15' || l !== '8775') throw new Error('wastage ' + w + ', labour ' + l);
+    const w = await get('Wastage qty (kg)'), l = await get('Job charges (₹)');
+    if (w !== '15' || l !== '8775') throw new Error('wastage ' + w + ', charges ' + l);
     await shot('07-dyeing');
     return save();
   });
-  await step('guidance: with no grey lot waiting, dyeing says to knit first and who to ask; too much soda shows the shortage under the line', async () => {
+  await step('guidance: with no grey lot waiting at the agency, dyeing says to knit first and who to ask; too much soda shows the shortage under the line', async () => {
     await openNew('dyeing');
+    await fill('Agency / unit', 'Bengal Dyeing House');
     const t = await guideText();
-    if (!/No grey fabric waiting at the Color Factory/.test(t) || !/Ask the Knitting department/.test(t)) throw new Error('guide: ' + t);
+    if (!/No grey fabric waiting at Bengal Dyeing House/.test(t) || !/Ask the Knitting department/.test(t)) throw new Error('guide: ' + t);
     await grid(0, 0, 'Item', 'SODA'); await grid(0, 0, 'Qty', 500);
     await waitFor(`!!document.querySelector('.hint-row:not([hidden]) .line-hint')`);
     const hint = await ev(`document.querySelector('.hint-row:not([hidden]) .line-hint').textContent`);
@@ -419,8 +461,9 @@ async function run() {
   /* ---- Finishing ---- */
   begin('8. Finishing & Packing: finish and pack into finished goods');
   await step('signs in', () => login('finishing1', PASS));
-  await step('570 kg dyed → 560 kg finished: 24 rolls weighed one by one (23 × 23.3 + 24.1 kg), 2200 m, 24 poly bags', async () => {
+  await step('570 kg dyed → 560 kg finished at Bengal Dyeing House: 24 rolls weighed one by one (23 × 23.3 + 24.1 kg), 2200 m, 24 poly bags', async () => {
     await openNew('finishing');
+    await fill('Agency / unit', 'Bengal Dyeing House');
     await fill('Colored fabric', 'CSJ'); await fill('Lot', 'L-0001');
     if (await get('Input qty (kg)') !== '570') throw new Error('input qty not filled');
     await grid(0, 0, 'Item', 'POLY'); await grid(0, 0, 'Qty', 24);
@@ -429,8 +472,8 @@ async function run() {
     const q = await get('Output qty (kg)'), n = await get('Rolls');
     if (q !== '560' || n !== '24') throw new Error('roll weights gave ' + q + ' kg, ' + n + ' rolls');
     await fill('Meters', 2200);
-    const w = await get('Wastage qty (kg)'), l = await get('Labour amount (₹)');
-    if (w !== '10' || l !== '3360') throw new Error('wastage ' + w + ', labour ' + l);
+    const w = await get('Wastage qty (kg)'), l = await get('Job charges (₹)');
+    if (w !== '10' || l !== '3360') throw new Error('wastage ' + w + ', charges ' + l);
     return save();
   });
   await checkAccess('finishing');
@@ -440,7 +483,9 @@ async function run() {
   await step('signs in', () => login('accounts1', PASS));
   await step('power bill ₹11,200 (absorbed at ₹20/kg over the 560 kg finished)', async () => {
     await openNew('overheads');
-    await fill('Category', 'Utilities (Power/Water)'); await fill('Amount (₹)', 11200); await fill('Paid to', 'CESC');
+    await fill('Expense head', 'Electricity'); await fill('Amount (₹)', 11200); await fill('Paid to', 'CESC');
+    // Electricity is a factory expense, so "Add to production cost" ticks itself
+    if (!(await ev(`[...document.querySelectorAll('label.check')].some(l => /production cost/.test(l.textContent) && l.querySelector('input').checked)`))) throw new Error('"Add to production cost" is not ticked');
     return save();
   });
 
@@ -451,7 +496,7 @@ async function run() {
     await openNew('customers'); await fill('Party name', 'Kolkata Garments'); await fill('State', 'West Bengal'); await fill('Credit limit (₹)', 100000); await fill('Credit days', 30);
     return save();
   });
-  await step('add customer Odisha Traders (Odisha → IGST)', async () => { await openNew('customers'); await fill('Party name', 'Odisha Traders'); await fill('State', 'Odisha'); return save(); });
+  await step('add customer Odisha Traders (Odisha → IGST)', async () => { await openNew('customers'); await fill('Party name', 'Odisha Traders'); await fill('State', 'Odisha'); await fill('UPI phone no / UPI ID', 'odisha@oksbi'); return save(); });
   await step('party price: Kolkata Garments pays ₹420/kg for FSJ', async () => {
     await openNew('priceList'); await fill('Customer', 'Kolkata Garments'); await fill('Item', 'FSJ'); await fill('Rate (₹/kg)', 420);
     return save();
@@ -514,30 +559,32 @@ async function run() {
   await checkAccess('sales');
 
   /* ---- Accounts: receipt ---- */
-  begin('11. Finance & Accounts: customer receipt and labour payable');
+  begin('11. Finance & Accounts: customer receipt and agency payment');
   await step('signs in', () => login('accounts1', PASS));
   await step('receive ₹50,000 from Kolkata Garments', async () => {
     await openNew('receipts'); await fill('Customer', 'Kolkata Garments'); await fill('Amount received (₹)', 50000); await fill('Mode', 'UPI');
     return save();
   });
-  // Labour earned on L-0001: knitting 585 × 8 = 4,680, dyeing 585 × 15 = 8,775, finishing 560 × 6 = 3,360.
-  await step('labour payment form shows ₹4,680 still payable for knitting; pay ₹4,000 in cash', async () => {
-    await openNew('labourPayments'); await fill('Process', 'Knitting');
-    if (!(await waitFor(`/4,680\.00/.test(T.get('Still payable'))`))) throw new Error('still payable shows "' + await get('Still payable') + '"');
-    await fill('Amount (₹)', 4000); await fill('Paid to', 'Knitting floor workers'); await fill('Mode', 'Cash');
+  // Job charges on L-0001: Maa Tara knitting 585 × 9 = 5,265; Bengal Dyeing House dyeing 585 × 15 = 8,775 + finishing 560 × 6 = 3,360.
+  await step('supplier payment form shows ₹5,265 owed to Maa Tara Knitting for knitting; pay ₹4,000 in cash', async () => {
+    await openNew('payments'); await fill('Supplier', 'Maa Tara Knitting');
+    if (!(await waitFor(`/5,265\.00 Cr/.test(T.get('Current balance'))`))) throw new Error('balance shows "' + await get('Current balance') + '"');
+    await fill('Amount (₹)', 4000); await fill('Mode', 'Cash');
     return save();
   });
-  await step('Labour Payable page: knitting ₹680, color ₹8,775, finishing & packing ₹3,360, total ₹12,815', async () => {
-    const h = await go('#/report/labourPayable');
-    if (h !== 'Labour Payable') throw new Error('page title ' + h);
-    await waitFor(`document.querySelectorAll('.kpi .kpi-value').length === 4`);
-    const tiles = await ev(`[...document.querySelectorAll('.kpi .kpi-value')].map(e => e.textContent).join(' | ')`);
-    const r = await api('/api/report/labourPayable');
-    const s = Object.fromEntries(r.tables[0].rows.map(x => [x.stage, x.closing]));
-    const good = s['Knitting'] === 680 && s['Color (Dyeing)'] === 8775 && s['Finishing & Packing'] === 3360 && /12,815\.00$/.test(tiles);
-    return good ? tiles : false;
+  await step('Maa Tara Knitting ledger: knitting charges on lot L-0001, payment, ₹1,265 still owed', async () => {
+    const p = (await api('/api/parties')).find(x => x.name === 'Maa Tara Knitting');
+    const l = await api('/api/report/partyLedger?party=' + p.id), last = l.rows[l.rows.length - 1];
+    return /Knitting charges, lot L-0001, 585 kg/.test(l.rows[0].narration) && last.balance === 1265 && last.drcr === 'Cr' ? l.rows.map(x => x.narration).join(' / ') : false;
   });
-  await shot('11-labour-payable');
+  await step('Payables page: Bengal Dyeing House ₹12,135 and Maa Tara Knitting ₹1,265 next to the yarn supplier', async () => {
+    const h = await go('#/report/outstanding?type=payable');
+    if (!/Outstanding/.test(h)) throw new Error('page title ' + h);
+    const b = Object.fromEntries((await api('/api/report/outstanding?type=payable')).rows.map(x => [x.party, x.balance]));
+    return b['Bengal Dyeing House'] === 12135 && b['Maa Tara Knitting'] === 1265 ? 'ok' : JSON.stringify(b);
+  });
+  await shot('11-payables');
+  await step('Labour Payable stays at ₹0: work done by agencies is paid through their accounts', async () => { const r = await api('/api/report/labourPayable'); return r.cards[r.cards.length - 1].value === 0; });
   await checkAccess('accounts');
 
   /* ---- Management ---- */
@@ -546,15 +593,15 @@ async function run() {
   await shot('12-dashboard');
   // Expected lot cost, worked out by hand:
   //   yarn 600 × 250 = 1,50,000   dyes 11.7 × 500 + 58.5 × 40 = 8,190   packing 24 × 5 = 120
-  //   labour 4,680 + 8,775 + 3,360 = 16,815   overhead 11,200   → total 1,86,325 for 560 kg
-  const TOTAL = 186325, KG = 560;
+  //   job charges 5,265 + 8,775 + 3,360 = 17,400   overhead 11,200   → total 1,86,910 for 560 kg
+  const TOTAL = 186910, KG = 560;
   const cost = await api('/api/report/costing');
   const row = cost.rows[0] || {};
-  await step('lot L-0001 total cost = ₹1,86,325 (material + labour + overhead + wastage)', () => { if (!near(row.total, TOTAL)) throw new Error('got ' + row.total); return '₹' + row.total; });
-  await step('cost per kg = ₹332.72, per roll = ₹7,763.54, per meter = ₹84.69', () => near(row.perKg, 332.72) && near(row.perRoll, 7763.54) && near(row.perMeter, 84.69));
-  // Knitting/dyeing labour spent on fabric later lost as waste moves into the wastage bucket; finishing labour, packing and overhead arrive whole.
-  await step('finishing labour ₹3,360, packing ₹120 and overhead ₹11,200 reach the lot in full', () => near(row.finLabour, 3360) && near(row.packing, 120) && near(row.overhead, 11200));
-  await step('all labour (₹16,815) is accounted for: in the lot or in its wastage cost', () => row.knitLabour + row.dyeLabour + row.finLabour < 16815 && row.knitLabour + row.dyeLabour + row.finLabour > 16815 * 0.95);
+  await step('lot L-0001 total cost = ₹1,86,910 (material + job charges + overhead + wastage)', () => { if (!near(row.total, TOTAL)) throw new Error('got ' + row.total); return '₹' + row.total; });
+  await step('cost per kg = ₹333.77, per roll = ₹7,787.92, per meter = ₹84.96', () => near(row.perKg, 333.77) && near(row.perRoll, 7787.92) && near(row.perMeter, 84.96));
+  // Knitting/dyeing charges spent on fabric later lost as waste move into the wastage bucket; finishing charges, packing and overhead arrive whole.
+  await step('finishing charges ₹3,360, packing ₹120 and overhead ₹11,200 reach the lot in full', () => near(row.finLabour, 3360) && near(row.packing, 120) && near(row.overhead, 11200));
+  await step('all job charges (₹17,400) are accounted for: in the lot or in its wastage cost', () => row.knitLabour + row.dyeLabour + row.finLabour < 17400 && row.knitLabour + row.dyeLabour + row.finLabour > 17400 * 0.95);
   await step('wastage cost is part of the total, not added twice', () => near(row.yarn + row.dyes + row.packing + row.knitLabour + row.dyeLabour + row.finLabour + row.overhead + row.wastage, TOTAL));
   await step('wastage report: 15 + 15 + 10 kg across the three stages', async () => { const w = await api('/api/report/wastage'); const s = w.tables[0].rows; return s.length === 3 && s.reduce((a, r) => a + r.qty, 0) === 40; });
   await step('lot tracking: L-0001 from the GRN (Shree Mills, 1000 kg) — yarn 600 → FG 560 (yield 93.33%), 400 kg sold, 160 kg in stock', async () => {
@@ -565,7 +612,7 @@ async function run() {
     const s = (await api('/api/report/stock')).rows;
     const y = s.find(r => r.item === 'Cotton Yarn 30s' && r.location === 'Main Store');
     const fg = s.find(r => r.location === 'Finished Goods Store');
-    const wip = s.filter(r => ['Knitting Factory', 'Color Factory'].includes(r.location));
+    const wip = s.filter(r => !['Main Store', 'Finished Goods Store'].includes(r.location));
     return y.qty === 400 && fg.qty === 160 && near(fg.value, TOTAL / KG * 160) && !wip.length;
   });
   await step('finished goods stock shows lot L-0001 (Red): 160 kg in 7 rolls of 19.4 + 23.3 × 5 + 24.1 kg', async () => {
@@ -598,6 +645,15 @@ async function run() {
     return last.balance === 82300 && last.drcr === 'Dr';
   });
   await step('no stock exceptions anywhere', async () => (await api('/api/report/negativeStock')).rows.length === 0);
+  await step('Agency Summary: what each agency did and is owed, nothing left lying with them', async () => {
+    const h = await go('#/report/agencies'); if (h !== 'Agency Summary') throw new Error('page title ' + h);
+    const a = Object.fromEntries((await api('/api/report/agencies')).rows.map(x => [x.agency, x]));
+    const m = a['Maa Tara Knitting'], b = a['Bengal Dyeing House'];
+    const good = m && b && m.entries === 1 && m.charges === 5265 && m.payable === 1265 && b.entries === 2 && b.charges === 12135 && b.payable === 12135 &&
+      m.yarn + m.grey + m.dyed + b.yarn + b.grey + b.dyed === 0 && b.work === 'Color (Dyeing), Finishing & Packing';
+    await shot('12-agency-summary');
+    return good ? 'ok' : JSON.stringify({ m, b });
+  });
   await step('every report page opens without errors', async () => {
     const bad = await ev(`(async () => { const bad = []; for (const k of Object.keys(REPORTS)) { await T.go('#/report/' + k); await new Promise(r => setTimeout(r, 250)); if (document.querySelector('.banner.err')) bad.push(k); } return bad; })()`);
     return bad.length ? false : Object.keys(await ev('REPORTS')).length + ' reports';
@@ -605,9 +661,164 @@ async function run() {
   await go('#/report/costing'); await sleep(400); await shot('12-costing');
   await checkAccess('manager');
 
+  /* ---- Bank, expenses, staff, CRM, godowns and approvals ---- */
+  begin('12b. Bank, expenses, staff, CRM, godowns, approvals');
+  const send2 = (m, url, body) => ev(`fetch(${J(url)}, { method: ${J(m)}, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + API.token }, body: ${J(JSON.stringify(body || {}))} }).then(r => r.json())`);
+  const tomorrow = await ev(`(() => { const d = new Date(); d.setDate(d.getDate() + 1); return U.isoDay(d); })()`);
+  await step('admin signs in', () => login('admin', 'admin123'));
+  await step('every new entry screen opens', async () => {
+    for (const k of ['banks', 'bankEntries', 'overheads', 'powerBills', 'loans', 'emiPayments', 'employees', 'attendance', 'salary', 'leads', 'quotations', 'jobStatus', 'godownTransfer']) await openNew(k);
+    return true;
+  });
+  await step('the dashboard shows today\'s money and the alerts', async () => {
+    await go('#/dashboard');
+    return (await waitFor(`!!document.querySelector('.today-card') && !!document.querySelector('.alerts-card')`, 8000)) ? 'shown' : false;
+  });
+  await step('bank account SBI Current, opening balance ₹50,000', async () => {
+    await openNew('banks'); await fill('Account name', 'SBI Current'); await fill('Opening balance (₹)', 50000);
+    return save();
+  });
+  await step('a receipt in two parts, cash ₹1,000 + UPI ₹2,000 into SBI, adds up to ₹3,000', async () => {
+    await openNew('receipts'); await fill('Customer', 'Odisha Traders');
+    await grid(0, 0, 'Mode', 'Cash'); await grid(0, 0, 'Amount', 1000);
+    await addLine(0); await grid(0, 1, 'Mode', 'UPI'); await grid(0, 1, 'Amount', 2000);
+    const acct = await grid(0, 1, 'Account'), amt = await get('Amount received (₹)');
+    if (amt !== '3000') throw new Error('amount ' + amt);
+    if (!acct) throw new Error('UPI part has no account');
+    const upi = await grid(0, 1, 'UPI phone / ID');
+    if (upi !== 'odisha@oksbi') throw new Error('UPI part did not get the customer\'s UPI ID: "' + upi + '"');
+    return save();
+  });
+  await step('bank book: SBI Current ₹52,000', async () => {
+    const r = await api('/api/report/bankBook');
+    const x = r.rows.find(y => y.account === 'SBI Current');
+    return x && x.close === 52000 ? 'SBI ' + x.close : false;
+  });
+  await step('a cheque receipt asks for the cheque no., date and bank; UPI asks for the phone or UPI ID and fills it from the customer', async () => {
+    await openNew('receipts'); await fill('Customer', 'Odisha Traders'); await fill('Amount received (₹)', 500);
+    await fill('Mode', 'UPI');
+    const upi = await get('Paid from UPI (phone no or UPI ID)');
+    if (upi !== 'odisha@oksbi') throw new Error('UPI ID "' + upi + '"');
+    await fill('Mode', 'Cheque');
+    if (await ev(`!!T.field('Paid from UPI (phone no or UPI ID)')`)) throw new Error('UPI box still shown for a cheque');
+    await fill('Cheque no', '004512'); await fill('Cheque date', TODAY); await fill('Bank & branch (on the cheque)', 'Axis Bank, Cuttack');
+    await save();
+    const r = (await api('/api/receipts')).find(x => x.refNo === '004512');
+    if (!r || r.mode !== 'Cheque' || r.payBank !== 'Axis Bank, Cuttack' || r.chequeDate !== TODAY || r.upi) throw new Error(JSON.stringify(r));
+    await go('#/list/receipts');
+    const listed = await ev(`[...document.querySelectorAll('table tbody td')].some(td => /004512 dt .*Axis Bank, Cuttack/.test(td.textContent))`);
+    return listed ? 'list shows cheque 004512, Axis Bank, Cuttack' : false;
+  });
+  await step('the cheque counts only once it is cashed: not in the bank until "Cheque cashed on" is filled in', async () => {
+    const sbi = async () => ((await api('/api/report/bankBook')).rows.find(y => y.account === 'SBI Current') || {}).close;
+    if (await sbi() !== 52000) throw new Error('the cheque reached the bank before it was cashed: ' + await sbi());
+    if (!(await ev(`[...document.querySelectorAll('table tbody td')].some(td => td.textContent.trim() === 'Not cashed')`))) throw new Error('the receipts list does not say "Not cashed"');
+    const r = (await api('/api/receipts')).find(x => x.refNo === '004512');
+    await go('#/edit/receipts/' + r.id);
+    if (!(await waitFor(`/Not cashed yet/.test(T.get('Cheque status'))`))) throw new Error('status reads "' + await get('Cheque status') + '"');
+    // saving an existing entry stays on the same page: wait for "Saved"
+    await fill('Cheque cashed', r.date);
+    await ev(`document.getElementById('toasts').innerHTML = ''`); await ev(`T.btn('Save')`);
+    if (!(await waitFor(`/Saved/.test(document.getElementById('toasts').textContent) || !!T.toastErr()`))) throw new Error('no answer to the save');
+    const err = await ev('T.toastErr()'); if (err) throw new Error('save refused: ' + err);
+    const after = await sbi();
+    return after === 52500 ? 'SBI ₹52,000 until cashed, then ₹' + after : false;
+  });
+  await step('every dropdown is searchable: typing "odis tra" in Customer lists only Odisha Traders, Enter picks it', async () => {
+    await openNew('receipts');
+    const plain = await ev(`[...document.querySelectorAll('.form select')].filter(s => !s.closest('.combo')).length`);
+    if (plain) throw new Error(plain + ' dropdown(s) without a search box');
+    const shown = await ev(`(() => {
+      const i = T.field('Customer').querySelector('.combo-input');
+      i.focus(); i.value = 'odis tra'; i.dispatchEvent(new Event('input'));
+      const opts = [...document.querySelectorAll('.combo-list .combo-opt')].map(o => o.textContent);
+      i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      return opts;
+    })()`);
+    await sleep(200);
+    const picked = await getText('Customer'), box = await ev(`T.field('Customer').querySelector('.combo-input').value`);
+    if (shown.length !== 1 || !/Odisha Traders/.test(picked) || box !== picked) throw new Error(JSON.stringify({ shown, picked, box }));
+    await go('#/report/partyLedger');
+    const filters = await ev(`[...document.querySelectorAll('.filters select')].filter(s => s.closest('.combo')).length`);
+    return filters ? 'listed ' + JSON.stringify(shown) + ', picked ' + picked + '; report filters searchable too' : false;
+  });
+  await step('transport expense: not added to production cost', async () => {
+    await openNew('overheads'); await fill('Expense head', 'Transport'); await fill('Amount (₹)', 800); await fill('Paid to', 'Sharma Transport');
+    if (await ev(`[...document.querySelectorAll('label.check')].some(l => /production cost/.test(l.textContent) && l.querySelector('input').checked)`)) throw new Error('transport went into production cost');
+    return save();
+  });
+  await step('staff: Ramu (Godown, ₹15,000 a month)', async () => {
+    await openNew('employees'); await fill('Employee name', 'Ramu'); await fill('Department', 'Godown'); await fill('Salary a month', 15000);
+    return save();
+  });
+  await step('attendance lists everyone as present; Ramu marked absent today', async () => {
+    await openNew('attendance');
+    const n = await ev('T.rows(0)'); if (n !== 1) throw new Error(n + ' staff lines');
+    await grid(0, 0, 'Attendance', 'Absent');
+    return save();
+  });
+  await step('salary form works out this month\'s salary from the attendance', async () => {
+    await openNew('salary'); await fill('Employee', 'Ramu'); await fill('Salary for month', (await ev('U.today()')).slice(0, 7));
+    if (!(await waitFor(`/^Due ₹/.test(T.get('Salary position'))`, 5000))) throw new Error('no salary figure: ' + await get('Salary position'));
+    const days = await ev(`(() => { const t = new Date(); return new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate(); })()`);
+    const t = await get('Salary position');
+    if (!t.includes('for ' + (days - 1) + ' of ' + days + ' days')) throw new Error(t);
+    if (!(+(await get('Amount paid (₹)')) > 0)) throw new Error('amount not filled');
+    await save();
+    return t;
+  });
+  await step('lead with a follow-up call; its next date becomes the lead\'s', async () => {
+    await openNew('leads'); await fill('Customer / prospect name', 'Howrah Kids Wear'); await fill('Mobile', '98300 12345');
+    await grid(0, 0, 'What was discussed', 'Asked for rates'); await grid(0, 0, 'Next follow-up', tomorrow);
+    await save();
+    const l = (await api('/api/leads')).find(x => x.name === 'Howrah Kids Wear');
+    return l && l.nextDate === tomorrow ? l.no : false;
+  });
+  await step('Godown 2 added; 20 kg of lot L-0001 moved there, its rolls picked', async () => {
+    await openNew('locations'); await fill('Location name', 'Godown 2'); await fill('Type', 'Godown'); await save();
+    await openNew('godownTransfer'); await fill('To godown', 'Godown 2'); await fill('Person responsible', 'Ramu');
+    await grid(0, 0, 'Item', 'FSJ'); await grid(0, 0, 'Lot', 'L-0001'); await grid(0, 0, 'Qty', 20);
+    await save();
+    const r = await api('/api/report/godownStock');
+    const x = r.rows.find(y => y.lot === 'L-0001'), g = r.columns.find(c => c.label === 'Godown 2 Kg');
+    return x && g && x[g.k] === 20 && x.kg === 160 ? 'Godown 2: 20 kg, total still 160 kg' : false;
+  });
+  await step('rolls only counted: 1000 kg in 300 rolls into Godown 2; a challan for 100 kg fills 30 rolls by itself', async () => {
+    await send2('PUT', '/api/settings', { weighRolls: false }); await ev('Cache.getSettings(true)');
+    await openNew('stockAdjust'); await fill('Location', 'Godown 2');
+    if (await ev(`[...document.querySelectorAll('.form table.grid thead th')].some(t => /Roll weights/.test(t.textContent))`)) throw new Error('roll weights column still shown');
+    await grid(0, 0, 'Item', 'FSJ'); await grid(0, 0, 'Qty', 1000); await grid(0, 0, 'Rolls', 300); await grid(0, 0, 'Rate', 400);
+    await save();
+    const lot = (await api('/api/stockAdjust')).sort((a, b) => (b.no || '').localeCompare(a.no || ''))[0].lines[0].lot;
+    await openNew('deliveries'); await fill('Customer', 'Kolkata Garments'); await fill('From godown', 'Godown 2');
+    await grid(0, 0, 'Item', 'FSJ'); await grid(0, 0, 'Lot', lot); await grid(0, 0, 'Qty', 100);
+    const rolls = await grid(0, 0, 'Rolls');
+    await go('#/dashboard');
+    return rolls === '30' ? 'lot ' + lot + ': 100 kg = ' + rolls + ' rolls' : false;
+  });
+  await step('with approval on, a staff change to an expense waits for the administrator', async () => {
+    await send2('PUT', '/api/settings', { approveChanges: true });
+    const e = await send2('POST', '/api/overheads', { date: await ev('U.today()'), category: 'Office Expenses', amount: 300, mode: 'Cash' });
+    await login('accounts1', PASS);
+    await go('#/edit/overheads/' + e.id); await fill('Amount (₹)', 350); await save();
+    const now = (await api('/api/overheads')).find(x => x.id === e.id);
+    if (now.amount !== 300) throw new Error('changed without approval');
+    await login('admin', 'admin123');
+    await go('#/approvals');
+    await ev(`[...document.querySelectorAll('.view button')].find(b => b.textContent === 'Approve').click()`);
+    if (!(await waitFor(`/Nothing is waiting/.test(document.querySelector('.view').textContent)`, 6000))) throw new Error('not approved');
+    const after = (await api('/api/overheads')).find(x => x.id === e.id);
+    await send2('PUT', '/api/settings', { approveChanges: false });
+    return after.amount === 350 && after.updatedBy === 'accounts1' ? 'approved: ₹300 → ₹350 by accounts1' : false;
+  });
+  await step('activity log shows who did what', async () => {
+    await go('#/report/activity');
+    return (await waitFor(`document.querySelectorAll('.view table.report tbody tr').length > 10 && /approved/.test(document.querySelector('.view table.report').textContent)`, 6000)) ? 'listed' : false;
+  });
+
   /* ---- Guard rails ---- */
   begin('13. Guard rails');
-  await step('manager cannot open user management', async () => (await go('#/list/users')) === 'No access');
+  await step('manager cannot open user management', async () => { await login('manager1', PASS); return (await go('#/list/users')) === 'No access'; });
   await step('knitting login cannot open an invoice even by typing its address', async () => {
     await login('knitting1', PASS);
     return (await go('#/edit/invoices/' + 'x')) === 'No access';

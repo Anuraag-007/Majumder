@@ -134,7 +134,7 @@ const Dash = (() => {
     const stageIcons = ['yarn', 'yarn', 'roll', 'truck', 'drop', 'box'];
     const pipe = card('Material in process', 'Right now · kg and value at each stage', h('div', { class: 'pipeline' }, d.pipeline.map((pp, i) => [
       i ? h('span', { class: 'arrow', 'aria-hidden': 'true' }, icon('chevron', 18)) : null,
-      h('a', { class: 'stage s' + i, href: '#/report/stock?location=' + pp.loc },
+      h('a', { class: 'stage s' + i, href: pp.href || '#/report/stock?location=' + pp.loc },
         h('span', { class: 'stage-ic' }, icon(stageIcons[i], 20)),
         h('span', { class: 'stage-label' }, pp.label),
         h('span', { class: 'stage-qty' }, U.qty(pp.qty) + ' kg'),
@@ -180,8 +180,22 @@ const Dash = (() => {
       ? h('ul', { class: 'plain recent' }, d.recent.map(r => h('li', null, h('a', { href: '#/edit/' + r.col + '/' + r.id }, r.label + ' ' + (r.no || '')), h('span', { class: 'muted' }, ' · ' + U.fmtDate(r.date) + (r.party ? ' · ' + r.party : '') + (r.lot && !r.party ? ' · lot ' + r.lot : '') + (r.amount ? ' · ₹ ' + U.money(r.amount) : '')))))
       : h('p', { class: 'muted' }, 'Nothing entered yet.'));
 
+    // Today's money and the things to act on (not tied to the period chosen above).
+    const now = d.now, td = U.today();
+    const today = now ? card('Today', dText(td) + ' · bank & cash ' + rupee0(now.bank), [
+      h('div', { class: 'today-grid' }, [
+        ['Sales today', now.salesToday, '#/report/sales?from=' + td + '&to=' + td], ['Sales this month', now.salesMonth, '#/report/sales?from=' + U.monthStart() + '&to=' + td],
+        ['Collected today', now.collectedToday, '#/list/receipts'], ['Spent today', now.spentToday, '#/report/expenses?from=' + td + '&to=' + td],
+      ].map(([l, v, href]) => h('a', { class: 'money-mini', href }, h('span', null, l), h('b', null, rupee0(v))))),
+      now.accounts.length ? h('ul', { class: 'plain accts' }, now.accounts.slice(0, 5).map(a => h('li', null, h('a', { href: '#/report/bankBook' }, a.name), h('b', null, rupee0(a.value))))) : null,
+    ], 'today-card', '#/report/bankBook') : null;
+    const todo = d.alerts ? card('Alerts', d.alerts.length ? d.alerts.length + ' thing' + (d.alerts.length === 1 ? '' : 's') + ' to look at' : 'Nothing needs attention right now',
+      d.alerts.length ? h('ul', { class: 'plain alerts' }, d.alerts.map(a => h('li', null, h('span', { class: 'badge ' + (a.level === 'bad' ? 'bad' : 'warn') }, a.level === 'bad' ? 'Act now' : 'Soon'), ' ', a.href ? h('a', { href: a.href }, a.text) : a.text)))
+        : h('p', { class: 'muted' }, 'No overdue invoices, late job work, EMIs, bills or follow-ups due.'), 'alerts-card') : null;
+
     return [
       k.exceptions ? h('a', { class: 'banner warn', href: '#/report/negativeStock' }, icon('alert', 18), k.exceptions + ' stock exception(s): some entries consume more than is in stock. Review them.') : null,
+      today || todo ? h('div', { class: 'dgrid' }, today, todo) : null,
       h('div', { class: 'dgrid' }, hero, cash),
       tiles,
       pipe,
@@ -225,7 +239,7 @@ const Dash = (() => {
     fromIn.onchange = () => { if (fromIn.value && fromIn.value <= q.to) load({ from: fromIn.value, to: q.to }); };
     toIn.onchange = () => { if (toIn.value && toIn.value >= q.from) load({ from: q.from, to: toIn.value }); };
 
-    const quick = [['GRN', 'grn'], ['Knitting', 'knitting'], ['Dyeing', 'dyeing'], ['Finishing', 'finishing'], ['Invoice', 'invoices'], ['Receipt', 'receipts']].filter(([, key]) => Perm.can(SCHEMAS[key].area, 'edit'));
+    const quick = [['GRN', 'grn'], ['Knitting', 'knitting'], ['Dyeing', 'dyeing'], ['Finishing', 'finishing'], ['Invoice', 'invoices'], ['Receipt', 'receipts'], ['Expense', 'overheads']].filter(([, key]) => Perm.can(SCHEMAS[key].area, 'edit'));
     main.append(
       h('div', { class: 'page-head' },
         h('div', null, h('h1', null, 'Business overview'), sub),

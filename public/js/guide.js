@@ -13,14 +13,15 @@ const Guide = (() => {
     grn: ['New GRN', 'the Store'],
     yarnIssue: ['Issue yarn', 'the Store'],
     transfers: ['New stock transfer', 'the Store'],
-    greyTransfer: ['Transfer to Color Factory', 'the Knitting department'],
+    greyTransfer: ['Send grey for dyeing', 'the Knitting department'],
+    godownTransfer: ['New godown transfer', 'the Godown / Store'],
     knitting: ['New knitting entry', 'the Knitting department'],
     dyeing: ['New dyeing entry', 'the Dyeing department'],
     finishing: ['New finishing entry', 'the Finishing department'],
     items: ['Add item', 'the administrator (Masters)'],
     parties: ['Add supplier', 'the administrator (Masters)'],
     customers: ['Add customer', 'the Sales department'],
-    processes: ['Labour rates', 'the administrator (Masters)', '#/list/processes'],
+    processes: ['Standard rates', 'the administrator (Masters)', '#/list/processes'],
     boms: ['Add recipe', 'the administrator (Masters)'],
   };
   const step = key => {
@@ -65,6 +66,32 @@ const Guide = (() => {
     if (!open.length) return catSupply(ctx, cat, 'STORE');
     return { text: (open.length === 1 ? 'Purchase order ' + open[0].no + ' is' : open.length + ' purchase orders (' + nos(open) + ') are') + ' still to be received: when the goods arrive, make the GRN against it.', screen: 'grn' };
   }
+  // Where material of these categories is now, place by place: "Agency A (L-0001 500 kg); Agency B (...)".
+  function whereIs(ctx, cats, test, max = 4) {
+    const m = new Map();
+    for (const r of rows(ctx)) {
+      if (!(r.qty > 0.0005) || !test(r.loc) || !cats.includes(catOf(r.item))) continue;
+      const e = m.get(r.loc) || []; e.push((r.lot || 'no lot') + ' ' + amt(r.qty, r.item)); m.set(r.loc, e);
+    }
+    const list = [...m.entries()];
+    return list.slice(0, max).map(([l, lots]) => locName(l) + ' (' + lots.slice(0, 3).join(', ') + more(lots.length, 3) + ')').join('; ') + more(list.length, max);
+  }
+  const godown = id => S.isGodown(Cache.byId('locations', id));
+  const godownName = id => locName(id || 'FG');
+  const atAgency = l => l !== 'STORE' && !godown(l);
+
+  /* ---- agencies (parties that knit, dye or finish for us) ---- */
+  const WORD = { Knitting: 'knitting', Dyeing: 'dyeing', Finishing: 'finishing' };
+  const places = stage => Cache.list('locations').filter(l => S.doesWork(l, stage, id => Cache.byId('parties', id)));
+  const masters = (label, href) => Perm.can('masters', 'edit') ? { label, href } : { ask: 'the administrator (Masters)' };
+  const noAgency = stage => !places(stage).length && note('stop', 'No ' + WORD[stage] + ' agency yet. Add it in Masters → Parties: type Job Worker, tick "Does ' + WORD[stage] + '" and give its rate per kg.', masters('Add agency', '#/edit/parties/new'));
+  function noRate(d, stage) {
+    if (S.num(d.labourRate) || S.num(d.labour)) return null;
+    const l = Cache.byId('locations', d.location), p = l && l.party ? Cache.byId('parties', l.party) : null;
+    return note('warn', 'There is no ' + WORD[stage] + ' rate, so the job charges will be ₹0 and the lot will look cheaper than it is. ' +
+      (p ? 'Set the rate of ' + nm(p) + ' in Masters → Parties' : 'Set the rate in Masters → Processes') + ', or type the charges.', p ? masters('Edit ' + nm(p), '#/edit/parties/' + p.id) : 'processes');
+  }
+
   const suppliers = () => Cache.list('parties').some(p => S.partyIs(p, 'Supplier'));
   const customers = () => Cache.list('parties').some(p => S.partyIs(p, 'Customer'));
   const nos = list => list.slice(0, 3).map(d => d.no).join(', ') + more(list.length, 3);
@@ -108,9 +135,10 @@ const Guide = (() => {
 
   function saleNotes(d, ctx, col) {
     const out = [noCustomers()];
-    if (!stockOf(ctx, ['Finished Goods'], 'FG').length) {
-      const h = catSupply(ctx, 'Finished Goods', 'FG');
-      out.push(note('stop', 'No finished goods in the Finished Goods Store to dispatch. ' + h.text, h.screen));
+    const loc = d.location || 'FG';
+    if (!stockOf(ctx, ['Finished Goods'], loc).length) {
+      const h = catSupply(ctx, 'Finished Goods', loc);
+      out.push(note('stop', 'No finished goods in ' + godownName(loc) + ' to dispatch. ' + h.text, h.screen));
     }
     if (d.party && col === 'deliveries' && !d.soId) {
       const open = Cache.list('salesOrders').filter(o => o.party === d.party && o.status === 'Open' && pendingFrom(o, 'deliveries', 'soId', d.id).length);
@@ -156,7 +184,7 @@ const Guide = (() => {
     },
     yarnIssue: (d, ctx) => {
       if (!hasItems('Yarn')) return [noItem('Yarn')];
-      const out = [];
+      const out = [noAgency('Knitting')];
       const yarn = stockOf(ctx, ['Yarn'], 'STORE');
       if (!yarn.length) { const h = storeSupply(ctx, 'Yarn'); out.push(note('stop', 'No yarn in the Main Store to issue. ' + h.text, h.screen)); }
       else if (!(d.lines || []).some(l => l.item)) out.push(note('tip', 'Yarn in the Main Store: ' + listOf(yarn) + '.'));
@@ -166,45 +194,81 @@ const Guide = (() => {
       }
       return out;
     },
-    greyTransfer: (d, ctx) => stockOf(ctx, ['Grey Fabric'], 'KNIT').length ? [] :
-      [note('tip', 'Nothing is waiting at the Knitting Factory. Knitting entries send grey fabric straight to the Color Factory, so this screen is only for fabric that was held back.')],
+    greyTransfer: (d, ctx) => {
+      const out = [noAgency('Dyeing')];
+      if (!d.fromLoc) {
+        const w = whereIs(ctx, ['Grey Fabric'], l => !godown(l));
+        out.push(note('tip', w ? 'Grey fabric now at: ' + w + '.' : 'There is no grey fabric anywhere yet: knit a lot first.'));
+      } else if (!stockOf(ctx, ['Grey Fabric'], d.fromLoc).length) {
+        out.push(note('tip', 'Nothing is waiting at ' + locName(d.fromLoc) + '. Knitting entries normally send the grey fabric straight to the dyeing agency, so this screen is only for fabric that was kept back.'));
+      }
+      return out;
+    },
     knitting: (d, ctx) => {
-      const out = [noItem('Grey Fabric')];
-      const yarn = stockOf(ctx, ['Yarn'], d.location || 'KNIT');
-      if (!yarn.length) { const h = catSupply(ctx, 'Yarn', 'KNIT'); out.push(note('stop', 'No yarn at the Knitting Factory. ' + h.text, h.screen)); }
-      else if (!(d.lines || []).some(l => l.item)) out.push(note('tip', 'Yarn ready at the Knitting Factory: ' + listOf(yarn) + '.'));
-      if (!S.num(d.labourRate) && !S.num(d.labour)) out.push(note('warn', 'There is no knitting labour rate, so labour will be ₹0 and the lot will look cheaper than it is. Set the rate in Masters → Processes, or type the labour amount.', 'processes'));
+      const out = [noItem('Grey Fabric'), noAgency('Knitting')];
+      if (!d.location) {
+        const w = whereIs(ctx, ['Yarn'], atAgency);
+        if (w) out.push(note('tip', 'Choose the knitting agency. Yarn issued to agencies: ' + w + '.'));
+      } else {
+        const yarn = stockOf(ctx, ['Yarn'], d.location);
+        if (!yarn.length) { const h = catSupply(ctx, 'Yarn', d.location); out.push(note('stop', 'No yarn at ' + locName(d.location) + '. ' + h.text, h.screen)); }
+        else if (!(d.lines || []).some(l => l.item)) out.push(note('tip', 'Yarn at ' + locName(d.location) + ': ' + listOf(yarn) + '.'));
+      }
+      out.push(noRate(d, 'Knitting'));
       return out;
     },
     dyeing: (d, ctx) => {
-      const out = [noItem('Colored Fabric')];
-      if (!stockOf(ctx, ['Grey Fabric'], 'DYE').length) { const h = catSupply(ctx, 'Grey Fabric', 'DYE'); out.push(note('stop', 'No grey fabric waiting at the Color Factory. ' + h.text, h.screen)); }
-      else if (!d.lotNo) out.push(note('tip', 'Grey lots waiting to dye: ' + lotsWaiting(ctx, ['Grey Fabric'], 'DYE') + '.'));
-      if (!stockOf(ctx, ['Dyes & Chemicals'], 'STORE').length) { const h = storeSupply(ctx, 'Dyes & Chemicals'); out.push(note('warn', 'There are no dyes or chemicals in the Main Store. ' + h.text, h.screen)); }
-      else if (!Cache.list('boms').some(b => b.stage === 'Dyeing')) out.push(note('tip', 'Save your dye recipes in Masters → BOM / Recipes. Picking a recipe then fills the chemicals for the batch weight.', 'boms'));
-      if (!S.num(d.labourRate) && !S.num(d.labour)) out.push(note('warn', 'There is no dyeing labour rate, so labour will be ₹0. Set it in Masters → Processes, or type the labour amount.', 'processes'));
+      const out = [noItem('Colored Fabric'), noAgency('Dyeing')];
+      if (!d.location) {
+        const w = whereIs(ctx, ['Grey Fabric'], atAgency);
+        if (w) out.push(note('tip', 'Choose the dyeing agency. Grey fabric at the agencies: ' + w + '.'));
+      } else if (!stockOf(ctx, ['Grey Fabric'], d.location).length) {
+        const h = catSupply(ctx, 'Grey Fabric', d.location);
+        out.push(note('stop', 'No grey fabric waiting at ' + locName(d.location) + '. ' + h.text, h.screen));
+      } else if (!d.lotNo) out.push(note('tip', 'Grey lots waiting at ' + locName(d.location) + ': ' + lotsWaiting(ctx, ['Grey Fabric'], d.location) + '.'));
+      if (stockOf(ctx, ['Dyes & Chemicals'], 'STORE').length && !Cache.list('boms').some(b => b.stage === 'Dyeing')) out.push(note('tip', 'If you supply the dyes and chemicals, save your recipes in Masters → BOM / Recipes: picking one fills the chemicals for the batch weight.', 'boms'));
+      out.push(noRate(d, 'Dyeing'));
       return out;
     },
     finishing: (d, ctx) => {
-      const out = [noItem('Finished Goods')];
-      if (!stockOf(ctx, ['Colored Fabric'], 'DYE').length) {
-        const grey = stockOf(ctx, ['Grey Fabric'], 'DYE').length;
-        out.push(note('stop', 'No dyed fabric waiting to be finished. ' + (grey ? 'The grey lots at the Color Factory must be dyed first.' : catSupply(ctx, 'Colored Fabric', 'DYE').text), 'dyeing'));
-      } else if (!d.lotNo) out.push(note('tip', 'Dyed lots ready to finish: ' + lotsWaiting(ctx, ['Colored Fabric'], 'DYE') + '.'));
-      if (!stockOf(ctx, ['Packing Material'], 'STORE').length) { const h = storeSupply(ctx, 'Packing Material'); out.push(note('warn', 'There is no packing material (poly bags, tubes, tape) in the Main Store. ' + h.text + ' You can also leave the packing list empty for now.', h.screen)); }
-      if (S.num(d.outQty) > 0 && !String(d.rollWeights || '').trim()) out.push(note('tip', 'Weigh each roll and type the weights in "Roll weights" (for example 20.2 + 50.3 + 39.5). Sales then go roll by roll and the stock shows every roll.'));
-      if (!S.num(d.labourRate) && !S.num(d.labour)) out.push(note('warn', 'There is no finishing labour rate, so labour will be ₹0. Set it in Masters → Processes, or type the labour amount.', 'processes'));
+      const out = [noItem('Finished Goods'), noAgency('Finishing')];
+      if (!d.location) {
+        const w = whereIs(ctx, ['Colored Fabric'], atAgency);
+        if (w) out.push(note('tip', 'Choose the finishing agency. Dyed fabric at the agencies: ' + w + '.'));
+      } else if (!stockOf(ctx, ['Colored Fabric'], d.location).length) {
+        const grey = stockOf(ctx, ['Grey Fabric'], d.location).length;
+        const h = grey ? { text: 'Its grey lots must be dyed first.', screen: 'dyeing' } : catSupply(ctx, 'Colored Fabric', d.location);
+        out.push(note('stop', 'No dyed fabric waiting at ' + locName(d.location) + '. ' + h.text, h.screen));
+      } else if (!d.lotNo) out.push(note('tip', 'Dyed lots ready at ' + locName(d.location) + ': ' + lotsWaiting(ctx, ['Colored Fabric'], d.location) + '.'));
+      if ((Cache.settings || {}).weighRolls && S.num(d.outQty) > 0 && !String(d.rollWeights || '').trim()) out.push(note('tip', 'Weigh each roll and type the weights in "Roll weights" (for example 20.2 + 50.3 + 39.5). Sales then go roll by roll and the stock shows every roll.'));
+      out.push(noRate(d, 'Finishing'));
       return out;
     },
     salesOrders: (d, ctx) => {
       const out = [noCustomers()];
       for (const l of d.lines || []) {
         if (!l.item || !(S.num(l.qty) > 0)) continue;
-        const have = qtyAt(ctx, l.item, 'FG'), it = itemOf(l.item) || {};
-        if (S.num(l.qty) > have + 0.0005) out.push(note('tip', nm(it) + ': ordered ' + amt(l.qty, l.item) + ', the Finished Goods Store has ' + (have > 0.0005 ? 'only ' + amt(have, l.item) + ', so ' + amt(S.num(l.qty) - have, l.item) + ' must' : 'none, so it must') + ' be produced before dispatch.'));
+        const have = rows(ctx).filter(r => r.item === l.item && godown(r.loc) && r.qty > 0).reduce((t, r) => t + r.qty, 0), it = itemOf(l.item) || {};
+        if (S.num(l.qty) > have + 0.0005) out.push(note('tip', nm(it) + ': ordered ' + amt(l.qty, l.item) + ', the godowns have ' + (have > 0.0005 ? 'only ' + amt(have, l.item) + ', so ' + amt(S.num(l.qty) - have, l.item) + ' must' : 'none, so it must') + ' be produced before dispatch.'));
       }
       return out;
     },
+    godownTransfer: (d, ctx) => {
+      const out = [];
+      if (Cache.list('locations').filter(l => S.isGodown(l) && !l.inactive).length < 2) out.push(note('stop', 'There is only one godown. Add the others in Masters → Locations & Godowns with type Godown.', masters('Add godown', '#/edit/locations/new')));
+      else if (d.fromLoc && !stockOf(ctx, ['Finished Goods'], d.fromLoc).length) out.push(note('tip', 'No finished goods in ' + godownName(d.fromLoc) + '. Godowns with stock: ' + (whereIs(ctx, ['Finished Goods'], godown) || 'none') + '.'));
+      return out;
+    },
+    jobStatus: (d, ctx) => {
+      const w = whereIs(ctx, ['Grey Fabric', 'Colored Fabric'], atAgency);
+      if (!w) return [note('tip', 'No grey or dyed fabric is at an agency right now.')];
+      return [d.location && !rows(ctx).some(r => r.loc === d.location && r.qty > 0.0005 && ['Grey Fabric', 'Colored Fabric'].includes(catOf(r.item)))
+        ? note('warn', 'No grey or dyed fabric at ' + locName(d.location) + '. Fabric at the agencies: ' + w + '.') : !d.location ? note('tip', 'Fabric at the agencies: ' + w + '.') : null];
+    },
+    leads: d => d.status === 'Won' && !d.party
+      ? [note('tip', 'Won: add ' + (d.name || 'them') + ' as a customer, then choose them here under "Existing customer".', Perm.can('masters', 'edit')
+        ? { label: 'Add customer', href: '#/edit/customers/new?' + new URLSearchParams({ name: d.name || '', phone: d.phone || '', city: d.city || '', contactPerson: d.contactPerson || '' }).toString() } : 'customers')]
+      : [],
     deliveries: (d, ctx) => saleNotes(d, ctx, 'deliveries'),
     invoices: (d, ctx) => d.challanId ? [] : saleNotes(d, ctx, 'invoices'),
   };
@@ -212,13 +276,15 @@ const Guide = (() => {
   // What happens after this entry is saved.
   const NEXT = {
     purchaseOrders: 'Next: when the goods arrive, the Store makes a GRN against this order.',
-    grn: 'Next: Purchase books the supplier bill against this GRN, and the Store issues the yarn to knitting by its lot number (Yarn Issue to Knitting).',
+    grn: 'Next: Purchase books the supplier bill against this GRN, and the Store issues the yarn to a knitting agency by its lot number (Yarn Issue to Knitting).',
     purchaseBills: 'Next: Accounts pays the supplier (Supplier Payments).',
-    yarnIssue: 'Next: the Knitting department makes the knitting entry with this yarn; the fabric keeps the same lot number.',
-    greyTransfer: 'Next: the Dyeing department picks the lot from the lot list.',
-    knitting: 'Next: the grey fabric is at the Color Factory under the same lot number, where the Dyeing department picks it from the lot list.',
-    dyeing: 'Next: Finishing & Packing picks this colored lot from the lot list.',
-    finishing: 'Next: Sales dispatches it from the Finished Goods Store with a challan or invoice.',
+    yarnIssue: 'Next: when the agency delivers the grey fabric, the Knitting department makes the knitting entry for that agency; the fabric keeps the same lot number.',
+    greyTransfer: 'Next: when the dyeing agency delivers, the Dyeing department picks the lot from that agency\'s lot list.',
+    knitting: 'Next: the grey fabric is at the agency it was sent to, under the same lot number. When it is dyed, the Dyeing department picks it from that agency\'s lot list.',
+    dyeing: 'Next: when the finished rolls come back, Finishing & Packing picks this colored lot from the lot list of the agency it was sent to.',
+    finishing: 'Next: Sales dispatches it from the godown with a challan or invoice; a Godown Transfer moves rolls to another godown first if needed.',
+    leads: 'Next: send a quotation (Sales → Quotations, "For lead"), and note each follow-up here.',
+    quotations: 'Next: when the customer confirms, make the sales order and choose this quotation under "Against quotation".',
     salesOrders: 'Next: a delivery challan against this order loads the pending quantity.',
     deliveries: 'Next: make the invoice against this challan.',
     invoices: 'Next: record the payment in Customer Receipts when it arrives.',
@@ -226,7 +292,7 @@ const Guide = (() => {
   // Lists the rules above read, loaded with the form.
   const NEEDS = {
     grn: ['purchaseOrders'], purchaseBills: ['grn', 'purchaseBills'], deliveries: ['salesOrders', 'invoices'], invoices: ['deliveries', 'invoices'],
-    yarnIssue: ['purchaseOrders', 'grn'], dyeing: ['purchaseOrders', 'grn'], finishing: ['purchaseOrders', 'grn'],
+    yarnIssue: ['purchaseOrders', 'grn'], dyeing: ['purchaseOrders', 'grn'], finishing: ['purchaseOrders', 'grn'], leads: ['parties'],
   };
 
   function panel(s, doc, ctx) {
