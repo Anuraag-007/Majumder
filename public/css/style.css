@@ -239,6 +239,7 @@ table.grid th { font-size: 11.5px; font-weight: 600; text-transform: uppercase; 
 table.grid td { padding: 5px 6px; border-bottom: 1px solid var(--gridline); min-width: 90px; }
 table.grid th.wide { min-width: 240px; }
 table.grid td select, table.grid td .combo { min-width: 150px; }
+table.grid td input.lot-no { min-width: 160px; }
 table.grid td.idx, table.grid th.idx { width: 34px; min-width: 34px; text-align: center; color: var(--muted); }
 table.grid th.narrow { width: 90px; }
 table.grid th.num { text-align: right; }
@@ -322,8 +323,12 @@ a.kpi:hover { border-color: var(--accent); border-top-color: var(--edge); }
 .modal-back { position: fixed; inset: 0; background: var(--overlay); display: grid; place-items: center; padding: 16px; z-index: 50; }
 .modal { background: var(--surface); border-radius: 12px; padding: 20px 22px; width: 100%; max-width: 440px; box-shadow: var(--shadow-lg); border: 1px solid var(--border); }
 .modal h3 { font-size: 16px; }
-.modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 .modal-body { max-height: min(70vh, 640px); overflow-y: auto; }
+.modal-body p { margin: 8px 0; line-height: 1.45; }
+.modal-list { margin: 8px 0 8px 18px; padding: 0; line-height: 1.45; }
+.modal-list li { margin: 4px 0; }
+.nowrap { white-space: nowrap; }
 /* guidance on entry screens: panel above the form and notes under lines short of stock */
 .guide { display: grid; gap: 8px; margin: 0 0 14px; padding: 12px 14px; background: var(--surface); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: var(--radius); }
 .guide[hidden] { display: none; }

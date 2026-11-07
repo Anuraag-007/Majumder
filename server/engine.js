@@ -32,19 +32,32 @@ const byDate = (a, b) => (a.date || '').localeCompare(b.date || '') || (a.create
 
 // One lot number per lot of material, from the GRN (or opening stock) to the sale: L-0001, L-0002 ...
 // (or the pattern set in Settings, e.g. MH-2026-001). `date` is the entry's date, for patterns with a year.
-// Returns a function that hands out the next free number each time it is called.
+// Returns a function that hands out the next free number each time it is called. Lot numbers typed by
+// hand (lotCustom) are never handed out again, but do not move the automatic series on.
 function lotMaker(data, date) {
   const pattern = (data.settings || {}).lotPattern, day = date || today();
-  const used = new Set();
-  const add = v => { if (v) used.add(String(v).trim().toUpperCase()); };
-  for (const c of STOCK_COLS) for (const d of data[c] || []) { add(d.lotNo); add(d.outLot); for (const l of d.lines || []) add(l.lot); }
+  const norm = v => String(v).trim().toUpperCase();
+  const used = new Set(), custom = new Set();
+  const add = v => { if (v) used.add(norm(v)); };
+  for (const c of STOCK_COLS) for (const d of data[c] || []) { add(d.lotNo); add(d.outLot); for (const l of d.lines || []) { add(l.lot); if (l.lotCustom && l.lot) custom.add(norm(l.lot)); } }
   const esc = t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const shape = new RegExp('^' + lotPattern(pattern).replace(/\{YYYY\}/g, day.slice(0, 4)).split(/#+/).map(esc).join('(\\d+)') + '$');
   let n = 0;
-  for (const v of used) { const m = shape.exec(v); if (m) n = Math.max(n, parseInt(m[1], 10)); }
+  for (const v of used) { const m = !custom.has(v) && shape.exec(v); if (m) n = Math.max(n, parseInt(m[1], 10)); }
   const next = () => { let v; do v = lotFmt(++n, pattern, day); while (used.has(v)); used.add(v); return v; };
-  next.exists = lot => used.has(String(lot).trim().toUpperCase());
+  next.exists = lot => used.has(norm(lot));
+  next.reserve = lot => used.add(norm(lot));
   return next;
+}
+// A lot number typed by hand: letters, digits, - / . _ and spaces (never "|", which the stock keys use).
+const LOT_OK = /^[A-Z0-9][A-Z0-9 ._/-]{0,29}$/;
+// The first other entry holding this lot, e.g. "Knitting KNT-0003" (a lot in use keeps its number).
+function lotUsedBy(data, lot, selfId) {
+  for (const c of STOCK_COLS) for (const d of data[c] || []) {
+    if (d.id === selfId) continue;
+    if (d.lotNo === lot || d.outLot === lot || (d.lines || []).some(l => l.lot === lot)) return (DOC_LABELS[c] || c) + ' ' + (d.no || '');
+  }
+  return '';
 }
 
 // Is this lot of this item taken further by another entry (dyed, finished, moved or sold)?
@@ -612,7 +625,7 @@ function prepare(col, doc, data) {
 }
 
 // The lot number is given once, when yarn or fabric comes in, and the same number follows it to the sale:
-//   GRN / opening stock line  -> new lot L-0001 ...
+//   GRN / opening stock line  -> new lot L-0001 ... (left blank), or the lot number typed on the line
 //   knitting                  -> the lot of the main yarn (the yarn line with the most kg)
 //   dyeing, finishing         -> the lot taken in (no new number)
 function lotNumbers(col, doc, data) {
@@ -622,17 +635,34 @@ function lotNumbers(col, doc, data) {
   const lots = () => (maker = maker || lotMaker(data, doc.date));
   const newLot = () => lots()();
   if (col === 'grn' || col === 'stockAdjust') {
-    const oldLots = new Set(((old && old.lines) || []).map(l => l.lot).filter(Boolean));
+    const bad = msg => { throw Object.assign(new Error(msg), { status: 400 }); };
+    const oldLines = (old && old.lines) || [];
+    const oldLots = new Set(oldLines.map(l => l.lot).filter(Boolean)), oldCustom = new Set(oldLines.filter(l => l.lotCustom).map(l => l.lot));
     // Entries saved before lot numbers were automatic may hold yarn without a lot: those lines stay as they were.
-    const legacy = new Set(((old && old.lines) || []).filter(l => !l.lot).map(l => l.item));
+    const legacy = new Set(oldLines.filter(l => !l.lot).map(l => l.item));
+    const blank = [], typed = [];
     for (const l of doc.lines || []) {
       l.lot = String(l.lot || '').trim();
+      delete l.lotCustom;
       if (!LOT_CATEGORIES.includes(cat(l.item))) continue;
       if (col === 'stockAdjust' && !(num(l.qty) > 0)) continue; // a - line takes from the lot chosen
-      // Keep the lot this entry already gave, or (opening stock) add to a lot that exists; anything else gets a new number.
-      if (l.lot && (oldLots.has(l.lot) || (col === 'stockAdjust' && lots().exists(l.lot)))) continue;
+      // Keep the lot this entry already gave, or (opening stock) add to a lot that exists.
+      if (l.lot && oldLots.has(l.lot)) { if (oldCustom.has(l.lot)) l.lotCustom = true; continue; }
+      if (l.lot && col === 'stockAdjust' && lots().exists(l.lot)) continue;
       if (!l.lot && legacy.has(l.item)) continue;
-      l.lot = newLot();
+      if (!l.lot) { blank.push(l); continue; }
+      // A lot number typed by hand is used as it is (in capitals), once.
+      l.lot = l.lot.replace(/\s+/g, ' ').toUpperCase();
+      if (!LOT_OK.test(l.lot)) bad('Lot no "' + l.lot + '": use letters, digits, - / . _ and spaces only (up to 30)');
+      if (lots().exists(l.lot)) bad('Lot no ' + l.lot + ' is already used. Leave the lot no blank for the next automatic number, or type another');
+      l.lotCustom = true; typed.push(l.lot);
+    }
+    for (const t of typed) lots().reserve(t);
+    for (const l of blank) l.lot = newLot(); // everything left blank: the next automatic numbers
+    // A lot already taken further (issued, knitted, moved, sold) keeps its number.
+    for (const lot of oldLots) if (!(doc.lines || []).some(l => l.lot === lot)) {
+      const by = lotUsedBy(data, lot, doc.id);
+      if (by) bad('Lot ' + lot + ' is already used in ' + by + ': its lot number cannot be changed or its line removed');
     }
   }
   if (col === 'knitting') {
@@ -1338,8 +1368,28 @@ function buildReports(ctx) {
       return { payable: r2(ev.reduce((t, e) => t + e.earned - e.paid, 0)) };
     },
 
+    // A lot number typed on a GRN or opening stock line, checked before it is used: is it allowed, is it
+    // new, or where is it used already? `self` = the entry being edited (its own lots are fine).
+    lotCheck() {
+      const lot = String(q.lot || '').trim().replace(/\s+/g, ' ').toUpperCase();
+      const next = lotMaker(data, q.date)();
+      const has = (d, up) => [d.lotNo, d.outLot].concat((d.lines || []).map(l => l.lot)).some(v => v && (up ? String(v).toUpperCase() : v) === lot);
+      if (q.self && STOCK_COLS.some(c => (data[c] || []).some(d => d.id === q.self && has(d, true)))) return { lot, ok: true, own: true, next };
+      if (!LOT_OK.test(lot)) return { lot, ok: false, problem: 'format', next };
+      // name the entry that gave the lot first (GRN, opening stock), then any other
+      for (const c of ['grn', 'stockAdjust'].concat(STOCK_COLS.filter(x => x !== 'grn' && x !== 'stockAdjust'))) for (const d of data[c] || []) {
+        if (d.id === q.self || !has(d, true)) continue;
+        const l = (d.lines || []).find(x => String(x.lot || '').toUpperCase() === lot);
+        const item = l ? l.item : d.outItem || d.inItem;
+        return { lot, ok: false, problem: 'used', usedIn: (c === 'grn' ? '' : (DOC_LABELS[c] || c) + ' ') + (d.no || '') + (item ? ', ' + iName(item) : ''), next };
+      }
+      return { lot, ok: true, next };
+    },
+
     nextLot() {
-      return { lot: lotMaker(data, q.date)() };
+      const next = lotMaker(data, q.date), lots = [];
+      for (let i = 0; i < Math.min(50, Math.max(1, num(q.count) || 1)); i++) lots.push(next());
+      return { lot: lots[0], lots };
     },
 
     // One line per agency (and own factory): material lying there now, work done in the period,

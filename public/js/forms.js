@@ -339,10 +339,17 @@ async function renderForm(main, key, id, query) {
         if (cur && !opts.some(x => x.lot === cur)) opts.unshift({ lot: cur, qty: 0 });
         const u = unitOf(item);
         const blank = item && f.blank ? f.blank(obj) : null; // what an empty choice means here, e.g. "new lot (auto)"
-        return bind(h('select', { 'aria-label': label, onchange: e => { obj[f.k] = e.target.value; afterChange(); } },
+        // data-free: the search box offers what was typed as a new lot number
+        return bind(h('select', { 'aria-label': label, 'data-free': f.allowNew && item && f.allowNew(obj) ? 'New lot' : null, onchange: e => { obj[f.k] = e.target.value; afterChange(); } },
           h('option', { value: '' }, !item ? 'pick item first' : blank || (opts.length ? (opts.some(x => x.lot === '') ? '— no lot —' : '— select lot —') : 'no stock here')),
           opts.filter(x => x.lot !== '').map(x => h('option', { value: x.lot, selected: x.lot === cur }, x.lot + ' — ' + U.qty(x.qty) + ' ' + u + (x.rolls > 0 ? ' · ' + x.rolls + ' roll' + (x.rolls === 1 ? '' : 's') + (x.bag ? '' : ' (avg ' + U.qty(S.r2(x.qty / x.rolls)) + ' kg)') : ''))),
           opts.filter(x => x.lot === '').map(x => h('option', { value: '', selected: cur === '' }, '(no lot) — ' + U.qty(x.qty) + ' ' + u))));
+      }
+      case 'lotNew': {
+        // A new lot: blank = the next automatic number (shown greyed); type your own to use it instead.
+        if (!obj.item || !f.tracked(obj)) return h('div', { class: 'calc' }, obj.item ? 'no lot' : '');
+        return bind(h('input', { type: 'text', 'aria-label': label, class: 'lot-no', value: get() || '', placeholder: f.auto(obj, doc, ctx), maxlength: 30,
+          oninput: e => { obj[f.k] = e.target.value; afterInput(); }, onchange: () => { if (f.onChange) f.onChange(obj, doc, ctx); } }));
       }
       case 'rolls': {
         // Lots weighed roll by roll show the rolls taken on a button that opens the roll picker;
@@ -440,6 +447,8 @@ async function renderForm(main, key, id, query) {
   async function save(andNew) {
     const missing = validateForm();
     if (missing.length) { toast('Please fill: ' + missing.slice(0, 4).join(', ') + (missing.length > 4 ? '…' : ''), 'err'); return; }
+    // e.g. lot numbers typed by hand: checked and explained in a pop-up first
+    if (s.beforeSave && !(await s.beforeSave(doc, ctx))) return;
     if (s.credit && doc.party) {
       const p = Cache.byId('parties', doc.party) || {};
       const limit = S.num(p.creditLimit);
@@ -457,7 +466,7 @@ async function renderForm(main, key, id, query) {
       if (saved && saved.pending) { toast(saved.message); location.hash = '#/list/' + key; return; }
       Cache.invalidate(s.col);
       if (s.col === 'parties' || s.col === 'items') Cache.invalidate();
-      toast('Saved' + (saved.no ? ' ' + saved.no : ''));
+      toast('Saved' + (saved.no ? ' ' + saved.no : '') + (s.savedNote ? s.savedNote(saved) : ''));
       const target = andNew ? '#/edit/' + key + '/new' : '#/edit/' + key + '/' + saved.id;
       if (location.hash === target) window.dispatchEvent(new HashChangeEvent('hashchange')); else location.hash = target;
     } catch (e) { toast(e.message, 'err'); }

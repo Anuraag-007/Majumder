@@ -146,16 +146,81 @@ const C = {
   // Typing a roll count stops it being worked out from the kg.
   rolls: { k: 'rolls', label: 'Rolls', type: 'number', narrow: true, fmt: 'int', onInput: (d, r) => { if (r) r._rollsTouched = true; } },
   amount: { k: '_amount', label: 'Amount', type: 'calc', fmt: 'money', value: r => S.num(r.qty) * S.num(r.rate) },
-  // Lot numbers are given by the ERP when yarn or fabric is received, and never typed.
-  lotAuto: { k: 'lot', label: 'Lot no', type: 'calc', value: r => r.lot || (!r.item ? '' : lotTracked(r.item) ? 'new on save' : 'no lot') },
-  // Opening stock / adjustment: a + line can start a new lot or add to one; a - line takes from a lot.
-  lotAdjust: { k: 'lot', label: 'Lot no', type: 'lot', loc: d => d.location, itemKey: 'item', signed: true, blank: r => lotTracked(r.item) ? 'new lot (auto)' : '— no lot —' },
+  // Lot numbers are given by the ERP when yarn or fabric is received: the next number shows greyed in the
+  // box and is used unless someone types their own.
+  lotAuto: { k: 'lot', label: 'Lot no', type: 'lotNew', tracked: r => lotTracked(r.item), auto: (r, d, ctx) => nextLotFor(r, d, ctx), onChange: (r, d, ctx) => askLot(r, d, ctx) },
+  // Opening stock / adjustment: a + line can start a new lot (automatic or typed) or add to one; a - line takes from a lot.
+  lotAdjust: { k: 'lot', label: 'Lot no', type: 'lot', loc: d => d.location, itemKey: 'item', signed: true,
+    blank: r => lotTracked(r.item) ? 'new lot (auto) – or type a new lot no' : '— no lot —', allowNew: r => lotTracked(r.item) && !(S.num(r.qty) < 0),
+    // a lot number typed here ("New lot: ...") gets the same check and explanation as on a GRN
+    onChange: (r, d, ctx) => { r._lotNew = !!r.lot && !ctx.lots(d.location, r.item).some(x => x.lot === r.lot); if (r._lotNew) askLot(r, d, ctx, true); } },
   lotFrom: (locFn, label) => ({ k: 'lot', label: label || 'Lot / Batch', type: 'lot', loc: locFn, itemKey: 'item' }),
   // Rolls going out of a lot: for lots weighed roll by roll, a button to choose which rolls.
   rollsOut: (locFn, locked) => ({ k: 'rolls', label: 'Rolls', type: 'rolls', fmt: 'int', loc: locFn, locked, onInput: (d, r) => { if (r) r._rollsTouched = true; } }),
   // Only when rolls are weighed one by one (Settings), or the entry already has weights.
   rollWeights: { k: 'rollWeights', label: 'Roll weights (kg)', type: 'text', placeholder: 'e.g. 20.2 + 50.3', wide: true, show: d => weighRolls() || (d.lines || []).some(l => l.rollWeights) },
 };
+// The next automatic lot numbers, shown greyed in blank lot boxes ("L-0012 (auto)"). Loaded once per form
+// and date; the numbers are given for real when the entry is saved.
+const NextLots = { date: null, list: [], busy: false };
+function nextLotFor(r, d, ctx) {
+  const date = d.date || U.today();
+  if (NextLots.date !== date && !NextLots.busy) {
+    NextLots.busy = true;
+    API.report('nextLot', { date, count: 30 }).then(x => { NextLots.list = x.lots || []; }, () => { NextLots.list = []; })
+      .finally(() => { NextLots.date = date; NextLots.busy = false; if (ctx) ctx.rerender(); });
+  }
+  const i = (d.lines || []).filter(l => l.item && lotTracked(l.item) && !String(l.lot || '').trim()).indexOf(r);
+  return (NextLots.date === date && NextLots.list[i] ? NextLots.list[i] : 'next number') + ' (auto)';
+}
+/* A lot number typed by hand (GRN, or "New lot" on opening stock) is checked with the server and explained
+   in a pop-up before it is used, because that number then follows the material everywhere. Returns true when
+   the line can be saved as it is (own number confirmed, or left to the automatic number). */
+function askLot(r, d, ctx, adding) {
+  const lot = String(r.lot || '').trim().replace(/\s+/g, ' ').toUpperCase();
+  r.lot = lot;
+  if (!lot || r._lotOk === lot) return Promise.resolve(true);
+  if (r._ask && r._ask.lot === lot) return r._ask.p; // already asking (leaving the box and pressing Save)
+  const p = (async () => {
+    let x;
+    try { x = await API.report('lotCheck', { lot, date: d.date || U.today(), self: d.id || '' }); } catch (e) { return true; } // the server checks again on save
+    if (x.own) { r._lotOk = lot; return true; }
+    const item = (itemOf(r.item) || {}).name || 'this material';
+    const P = (...t) => h('p', null, ...t), B = t => h('b', null, t);
+    const auto = { label: 'Use the automatic number (' + x.next + ')', value: 'auto' }, again = { label: 'Type another', value: 'edit' };
+    let pick;
+    if (x.problem === 'format') {
+      pick = await modal('This lot number is not allowed', [P('"', B(lot), '" cannot be a lot number: use letters, digits, - / . _ and spaces only, up to 30 characters.'),
+        P('Or leave the Lot no box blank and the ERP gives the next number by itself.')], [again, Object.assign({ primary: true }, auto)]);
+    } else if (x.problem === 'used' && !adding) {
+      pick = await modal('Lot number ' + lot + ' is already used', [P('Lot ', B(lot), ' is already used in ', B(x.usedIn), '.'),
+        P('Each lot number is given only once, so that every lot can be traced from purchase to sale. Type a different number, or leave the box blank for the automatic one.')],
+        [again, Object.assign({ primary: true }, auto)]);
+    } else {
+      pick = await modal('Your own lot number: ' + lot, [
+        P(B(item), ' will get lot number ', B(lot), x.problem === 'used' ? ' and be added to that existing lot (used in ' + x.usedIn + ')' : '', '.'),
+        h('ul', { class: 'modal-list' },
+          h('li', null, 'This number stays with the material everywhere: yarn issue, knitting, dyeing, finishing, delivery challan and invoice.'),
+          h('li', null, 'Once the material has been issued, used or sold, the number can no longer be changed.'),
+          h('li', null, 'The automatic numbers carry on as before (next free: ', h('span', { class: 'nowrap' }, x.next), ').')),
+        P('Leave the box blank instead if you want the automatic number.'),
+      ], [auto, { label: 'Use ' + lot, value: 'use', primary: true }]);
+    }
+    if (pick === 'use') { r._lotOk = lot; ctx.rerender(); return true; } // redraw: the other lines' automatic numbers move up
+    if (pick === 'auto') { r.lot = ''; r._lotNew = false; ctx.rerender(); return true; }
+    // "Type another" (or Esc): back to the box to correct it
+    ctx.rerender();
+    const el = document.querySelector('.form [data-path="lines.' + (d.lines || []).indexOf(r) + '.lot"]');
+    if (el) { el.focus(); if (el.select) el.select(); }
+    return false;
+  })();
+  r._ask = { lot, p };
+  return p.finally(() => { r._ask = null; });
+}
+// Before saving: every typed lot number has been checked and explained.
+const lotsChecked = (typed, adding) => async (doc, ctx) => { for (const r of doc.lines || []) if (r.item && lotTracked(r.item) && typed(r) && !(await askLot(r, doc, ctx, adding))) return false; return true; };
+// "Saved GRN-0007 · lot numbers: SM/4471 (typed), L-0013"
+const lotsSaved = saved => { const l = (saved.lines || []).filter(x => x.lot && lotTracked(x.item)); return l.length ? (l.length === 1 ? ' · lot number ' : ' · lot numbers ') + [...new Set(l.map(x => x.lot + (x.lotCustom ? ' (typed)' : '')))].join(', ') : ''; };
 // Rolls are counted, not weighed, unless Settings say each roll is weighed.
 const weighRolls = () => !!(Cache.settings || {}).weighRolls;
 // Rolls in `kg` of a lot, at the lot's average (1000 kg in 300 rolls: 100 kg = 30 rolls; the last kg take what is left).
@@ -386,7 +451,9 @@ const SCHEMAS = {
   },
   grn: {
     title: 'Goods Receipt (GRN)', singular: 'GRN', col: 'grn', printTitle: 'GOODS RECEIPT NOTE',
-    note: 'Each yarn or fabric line gets its lot number (L-0001, L-0002 ...) when you save. That one number stays with the material through knitting, dyeing and finishing to the sale. Dyes, chemicals and packing have no lot.',
+    note: 'Each yarn or fabric line gets the next lot number (shown greyed in the Lot no box) when you save. To use your own lot number, type it in the box. That one number stays with the material through knitting, dyeing and finishing to the sale. Dyes, chemicals and packing have no lot.',
+    onNew: async () => { NextLots.date = null; },
+    beforeSave: lotsChecked(r => !!String(r.lot || '').trim()), savedNote: lotsSaved,
     layout: [
       { fields: [
         F.no, F.date, F.party('Supplier'),
@@ -521,13 +588,14 @@ const SCHEMAS = {
   },
   stockAdjust: {
     title: 'Opening Stock / Adjustment', singular: 'Stock Adjustment', col: 'stockAdjust',
-    note: 'Enter opening stock with positive qty and rate: leave the lot on "new lot (auto)" and yarn or fabric gets its own lot number when you save. Use negative qty, and choose the lot, to write off damaged or short stock.',
+    note: 'Enter opening stock with positive qty and rate: leave the lot on "new lot (auto)" and yarn or fabric gets the next lot number when you save, or type your own lot number in the lot box and pick "New lot". Use negative qty, and choose the lot, to write off damaged or short stock.',
     layout: [
       { fields: [F.no, F.date, { k: 'location', label: 'Location', type: 'ref', ref: 'locations', req: true, def: 'STORE', list: true }, { k: 'reason', label: 'Reason', type: 'select', options: ['Opening Stock', 'Physical Verification', 'Damage / Write-off', 'Other'], def: 'Opening Stock', list: true }] },
       { grid: { k: 'lines', title: 'Items (+ adds, - removes)', cols: [C.item(S.CATEGORIES, { onChange: r => { const i = itemOf(r.item); if (i && !S.num(r.rate)) r.rate = S.num(i.rate); } }), C.lotAdjust, C.rollWeights, C.qty('Qty (+/-)'), C.unit, C.rolls, { k: 'rate', label: 'Rate (for +)', type: 'number', fmt: 'money' }, C.amount],
         onEdit: (d, r) => { if (r) applyRollWeights(r, 'qty'); } } },
       { fields: [F.remarks] },
     ],
+    beforeSave: lotsChecked(r => r._lotNew && !!r.lot, true), savedNote: lotsSaved,
   },
 
   /* ===== Production ===== */

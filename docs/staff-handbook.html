@@ -360,7 +360,7 @@ table { margin: 3px 0 8px; }
       <tr><td>7</td><td>Finishing &amp; Packing</td><td>Finishing</td><td>The finishing agency's <b>finished rolls</b> come into the Finished Goods Store</td></tr>
     </table>
     <div class="note"><b>Golden rule:</b> each step can only use what the <b>previous step</b> put there, at that agency. If a list says <b>"no stock here"</b>, the step before it has not been done yet, or the material was sent to another agency.</div>
-    <div class="note"><b>One lot number, start to finish:</b> the ERP gives the lot number <b>once, on the GRN</b> (L-0001, L-0002 …). Nobody types it. Yarn issue, knitting, dyeing, finishing and the challan all pick that same number from a list, so lot L-0001 is the same lot from the supplier's yarn to the customer's invoice.</div>
+    <div class="note"><b>One lot number, start to finish:</b> the ERP gives the lot number <b>once, on the GRN</b> (L-0001, L-0002 …). It fills in by itself; type your own only if you want a different number (for example the supplier's lot). Yarn issue, knitting, dyeing, finishing and the challan all pick that same number from a list, so lot L-0001 is the same lot from the supplier's yarn to the customer's invoice.</div>
     <div class="tip"><b>Before you start:</b> the items in the example must exist in Masters → Items (Cotton Yarn 30s = Yarn, Grey Single Jersey 30s = Grey Fabric, Dyed Single Jersey 30s = Colored Fabric, Finished Single Jersey 30s = Finished Goods, plus your dyes, chemicals and packing). Add the supplier and both agencies in Masters → Parties: <b>Maa Tara Knitting</b> (Job Worker, tick <i>Does knitting</i>, rate 9) and <b>Bengal Dyeing House</b> (Job Worker, tick <i>Does dyeing</i> rate 15 and <i>Does finishing</i> rate 6).</div>
   </div>
 
@@ -382,7 +382,7 @@ table { margin: 3px 0 8px; }
       <tr><th style="width:32%">Box</th><th>Fill</th></tr>
       <tr><td>Supplier</td><td>Shree Spinning Mills</td></tr>
       <tr><td>Against PO</td><td>Pick the PO. The lines fill in by themselves</td></tr>
-      <tr><td>Lot no</td><td>Nothing to type. It shows <i>new on save</i>, and the yarn gets <b>L-0001</b> when you save. Dyes, chemicals and packing show <i>no lot</i></td></tr>
+      <tr><td>Lot no</td><td>Leave it: it shows <b>L-0001 (auto)</b> greyed, and the yarn gets <b>L-0001</b> when you save. To use your own number (for example the supplier's lot), type it in the box: a pop-up shows what it means; click <b>Use …</b> to keep it, or <b>Use the automatic number</b>. A number already used is refused in the pop-up, with where it is used. Dyes, chemicals and packing show <i>no lot</i></td></tr>
       <tr><td>Received at</td><td><b>Main Store</b></td></tr>
       <tr><td>Supplier challan no</td><td>From their delivery paper</td></tr>
     </table>

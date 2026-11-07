@@ -326,12 +326,14 @@ async function run() {
     await shot('03-guide-no-yarn');
     return 'shown';
   });
-  await step('GRN against PO-0001 loads the 4 pending lines; the yarn will get its lot number on save, the dye none', async () => {
+  await step('GRN against PO-0001 loads the 4 pending lines; the yarn shows its automatic lot number L-0001 (greyed), the dye none', async () => {
     await openNew('grn');
     await fill('Supplier', 'Shree Mills'); await fill('Against PO', 'PO-0001');
     const n = await ev('T.rows(0)'); if (n !== 4) throw new Error(n + ' lines loaded');
-    const yl = await grid(0, 0, 'Lot no'), dl = await grid(0, 1, 'Lot no');
-    if (yl !== 'new on save' || dl !== 'no lot') throw new Error('lot column shows ' + yl + ' / ' + dl);
+    const lotBox = `(() => { const g = document.querySelectorAll('.form table.grid')[0]; const c = [...g.querySelectorAll('thead th')].map(t => t.textContent.replace('*', '').trim()).indexOf('Lot no'); return g.querySelectorAll('tbody tr:not(.hint-row)')[0].cells[c].querySelector('input'); })()`;
+    await waitFor(`/^L-0001 \\(auto\\)$/.test(${lotBox}.placeholder)`);
+    const yl = await grid(0, 0, 'Lot no'), dl = await grid(0, 1, 'Lot no'), ph = await ev(`${lotBox}.placeholder`);
+    if (yl !== '' || dl !== 'no lot' || ph !== 'L-0001 (auto)') throw new Error('lot column shows "' + yl + '" (' + ph + ') / ' + dl);
     await fill('Supplier challan no', 'CH-55');
     return save();
   });
@@ -810,6 +812,48 @@ async function run() {
     const after = (await api('/api/overheads')).find(x => x.id === e.id);
     await send2('PUT', '/api/settings', { approveChanges: false });
     return after.amount === 350 && after.updatedBy === 'accounts1' ? 'approved: ₹300 → ₹350 by accounts1' : false;
+  });
+  await step('opening stock: type your own lot number in the lot box and pick "New lot"', async () => {
+    await openNew('stockAdjust'); await fill('Location', 'Godown 2');
+    await grid(0, 0, 'Item', 'FSJ'); await grid(0, 0, 'Qty', 5); await grid(0, 0, 'Rate', 400);
+    const offered = await ev(`(() => {
+      const g = document.querySelectorAll('.form table.grid')[0];
+      const c = [...g.querySelectorAll('thead th')].map(t => t.textContent.replace('*', '').trim()).indexOf('Lot no');
+      const i = g.querySelectorAll('tbody tr:not(.hint-row)')[0].cells[c].querySelector('.combo-input');
+      i.focus(); i.value = 'gd2 a'; i.dispatchEvent(new Event('input'));
+      const opts = [...document.querySelectorAll('.combo-list .combo-opt')].map(o => o.textContent);
+      i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      return opts;
+    })()`);
+    if (!offered.includes('New lot: GD2 A')) throw new Error('offered ' + JSON.stringify(offered));
+    if (!(await waitFor(`!!document.querySelector('.modal')`))) throw new Error('no pop-up explaining the typed lot number');
+    const title = await ev(`document.querySelector('.modal h3').textContent`);
+    await ev(`[...document.querySelectorAll('.modal-actions button')].find(b => b.textContent === 'Use GD2 A').click()`); await sleep(300);
+    await save();
+    const a = (await api('/api/stockAdjust')).find(x => (x.lines || []).some(l => l.lot === 'GD2 A' && l.lotCustom));
+    return a && title === 'Your own lot number: GD2 A' ? 'pop-up "' + title + '"; saved ' + a.no + ' with lot GD2 A' : false;
+  });
+  await step('GRN: a lot number typed by hand is explained in a pop-up, saved, and refused a second time', async () => {
+    const modal = () => ev(`(() => { const m = document.querySelector('.modal'); return m ? m.querySelector('h3').textContent : ''; })()`);
+    const press = label => ev(`[...document.querySelectorAll('.modal-actions button')].find(b => b.textContent.startsWith(${J(label)})).click()`);
+    await openNew('grn'); await fill('Supplier', 'Shree Mills');
+    await grid(0, 0, 'Item', 'Y30'); await grid(0, 0, 'Qty', 10); await grid(0, 0, 'Rate', 250);
+    await grid(0, 0, 'Lot no', 'sm/4471');
+    if (!(await waitFor(`!!document.querySelector('.modal')`))) throw new Error('no pop-up');
+    const t1 = await modal(); await press('Use SM/4471'); await sleep(300);
+    await ev(`document.getElementById('toasts').innerHTML = ''`);
+    await save();
+    const saved = await ev(`document.getElementById('toasts').textContent`);
+    const g = (await api('/api/grn')).find(x => (x.lines || []).some(l => l.lot === 'SM/4471' && l.lotCustom));
+    if (t1 !== 'Your own lot number: SM/4471' || !g || !/lot number SM\/4471 \(typed\)/.test(saved)) throw new Error(JSON.stringify({ t1, saved, g: !!g }));
+    await openNew('grn'); await fill('Supplier', 'Shree Mills');
+    await grid(0, 0, 'Item', 'Y30'); await grid(0, 0, 'Lot no', 'SM/4471');
+    if (!(await waitFor(`!!document.querySelector('.modal')`))) throw new Error('no pop-up for a used lot number');
+    const t2 = await modal(), why = await ev(`document.querySelector('.modal-body').textContent`);
+    await press('Use the automatic'); await sleep(400);
+    const box = await grid(0, 0, 'Lot no');
+    await go('#/dashboard');
+    return t2 === 'Lot number SM/4471 is already used' && /already used in GRN-\d+, Cotton Yarn 30s/.test(why) && box === '' ? 'saved: "' + saved + '"; second time: "' + t2 + '", box back to automatic' : false;
   });
   await step('activity log shows who did what', async () => {
     await go('#/report/activity');

@@ -380,6 +380,10 @@ const Combo = (() => {
     const cur = INDEX.get.call(c.sel);
     c.items = [...c.sel.options].map((o, i) => ({ o, i, t: o.textContent }))
       .filter(x => !x.o.disabled && (!terms.length || (x.o.value !== '' && terms.every(t => x.t.toLowerCase().includes(t)))));
+    // a select with data-free also offers what was typed as a new value (e.g. "New lot: MH-55")
+    const typed = String(q || '').trim().replace(/\s+/g, ' ').toUpperCase();
+    if (c.sel.dataset.free && typed && ![...c.sel.options].some(o => o.value.toUpperCase() === typed))
+      c.items.push({ o: null, i: -1, t: c.sel.dataset.free + ': ' + typed, add: typed });
     c.hi = terms.length ? 0 : Math.max(0, c.items.findIndex(x => x.i === cur));
     const rows = c.items.slice(0, MAX).map((x, n) => {
       const d = document.createElement('div');
@@ -435,6 +439,7 @@ const Combo = (() => {
     const x = c.items[n];
     close();
     if (!x) return c.show();
+    if (x.add) { c.sel.add(new Option(x.add, x.add)); x.i = c.sel.options.length - 1; }
     const changed = INDEX.get.call(c.sel) !== x.i;
     INDEX.set.call(c.sel, x.i);
     c.typed = false; c.show();

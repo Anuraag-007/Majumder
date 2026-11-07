@@ -32,9 +32,9 @@ const ok = (c, msg) => { if (!c) fails++; console.log((c ? 'PASS ' : 'FAIL ') + 
   const sup = (await call('POST', '/api/parties', { name: 'Sup', type: 'Supplier', state: 'West Bengal' })).j;
   const cus = (await call('POST', '/api/parties', { name: 'Cus', type: 'Customer', state: 'Odisha', creditLimit: 1000 })).j;
   const d = '2026-09-01';
-  r = await call('POST', '/api/grn', { date: d, party: sup.id, location: 'STORE', lines: [{ item: yarn.id, lot: 'B1', qty: 100, rate: 200 }, { item: chem.id, qty: 10, rate: 500 }, { item: '', qty: 5 }] });
+  r = await call('POST', '/api/grn', { date: d, party: sup.id, location: 'STORE', lines: [{ item: yarn.id, lot: '', qty: 100, rate: 200 }, { item: chem.id, qty: 10, rate: 500 }, { item: '', qty: 5 }] });
   ok(r.s === 201 && r.j.no === 'GRN-0001' && r.j.lines.length === 2 && r.j.total === 25000, 'GRN created ' + r.j.no + ' total ' + r.j.total);
-  ok(r.j.lines[0].lot === 'L-0001' && !r.j.lines[1].lot, 'GRN gives the yarn lot number L-0001 (a typed B1 is not used); the chemical gets none: ' + JSON.stringify(r.j.lines.map(l => l.lot)));
+  ok(r.j.lines[0].lot === 'L-0001' && !r.j.lines[1].lot, 'GRN gives the yarn lot number L-0001 (lot left blank = automatic); the chemical gets none: ' + JSON.stringify(r.j.lines.map(l => l.lot)));
   const grn = r.j;
   r = await call('POST', '/api/transfers', { date: d, purpose: 'Yarn Issue', fromLoc: 'STORE', toLoc: 'KNIT', lines: [{ item: yarn.id, lot: 'L-0001', qty: 150 }] }); ok(r.s === 400 && /raise a purchase order and receive it with a GRN/.test(r.j.error), 'over-issue rejected, with what to do: ' + r.j.error);
   r = await call('POST', '/api/transfers', { date: d, purpose: 'Yarn Issue', fromLoc: 'STORE', toLoc: 'KNIT', lines: [{ item: yarn.id, lot: 'L-0001', qty: 100 }] }); ok(r.s === 201, 'yarn issue');
@@ -134,8 +134,8 @@ const ok = (c, msg) => { if (!c) fails++; console.log((c ? 'PASS ' : 'FAIL ') + 
   ok(r.s === 400 && new RegExp('Roll 1 of lot ' + rd1).test(r.j.error), 'a roll that was already sold cannot be picked: ' + r.j.error);
   r = await call('POST', '/api/deliveries', { date: '2026-09-06', party: cus.id, location: 'FG', lines: [{ item: fg.id, lot: rd1, qty: 50, rate: 400, rollPick: [{ no: 2, kg: 50 }] }] });
   ok(r.s === 400 && /has only 47.5 kg/.test(r.j.error), 'taking more than is left on a roll is refused: ' + r.j.error);
-  r = await call('POST', '/api/stockAdjust', { date: d, location: 'DYE', reason: 'Physical Verification', lines: [{ item: col.id, lot: rd1, qty: 2, rate: 300 }, { item: col.id, lot: 'ZZ9', qty: 1, rate: 300 }, { item: chem.id, qty: 1, rate: 500 }] });
-  ok(r.s === 201 && r.j.lines[0].lot === rd1 && r.j.lines[1].lot === 'L-0005' && !r.j.lines[2].lot, 'a + adjustment adds to an existing lot; a made-up lot gets a real number; chemicals none: ' + JSON.stringify(r.j.lines ? r.j.lines.map(l => l.lot) : r.j.error));
+  r = await call('POST', '/api/stockAdjust', { date: d, location: 'DYE', reason: 'Physical Verification', lines: [{ item: col.id, lot: rd1, qty: 2, rate: 300 }, { item: col.id, lot: '', qty: 1, rate: 300 }, { item: chem.id, qty: 1, rate: 500 }] });
+  ok(r.s === 201 && r.j.lines[0].lot === rd1 && r.j.lines[1].lot === 'L-0005' && !r.j.lines[2].lot, 'a + adjustment adds to an existing lot; a new one without a lot gets the next number; chemicals none: ' + JSON.stringify(r.j.lines ? r.j.lines.map(l => l.lot) : r.j.error));
   const adj = r.j;
   r = await call('PUT', '/api/stockAdjust/' + adj.id, adj); ok(r.s === 200 && r.j.lines[1].lot === 'L-0005', 'editing keeps the lot numbers it gave: ' + JSON.stringify(r.j.lines ? r.j.lines.map(l => l.lot) : r.j.error));
   r = await call('POST', '/api/stockAdjust', { date: d, location: 'DYE', reason: 'Damage / Write-off', lines: [{ item: col.id, lot: rd1, qty: -2 }, { item: col.id, lot: 'L-0005', qty: -1 }] });
@@ -396,6 +396,39 @@ const ok = (c, msg) => { if (!c) fails++; console.log((c ? 'PASS ' : 'FAIL ') + 
   await call('PUT', '/api/settings', { lotPattern: 'MH-{YYYY}-###' });
   r = await call('POST', '/api/grn', { date: dayOff(-12), party: sup.id, location: 'STORE', lines: [{ item: yarn.id, qty: 50, rate: 200 }] });
   const L2 = r.j.lines[0].lot; ok(L2 === 'MH-' + dayOff(-12).slice(0, 4) + '-001', 'lot numbers in the new format: ' + L2);
+  // ---- lot numbers: automatic unless someone types their own ----
+  { r = await call('GET', '/api/report/nextLot?count=3&date=' + TODAY); const nx = r.j.lots;
+    ok(nx.length === 3 && new Set(nx).size === 3 && nx[0] === 'MH-' + TODAY.slice(0, 4) + '-002', 'the form can show the next 3 automatic lot numbers: ' + nx.join(', '));
+    r = await call('POST', '/api/grn', { date: TODAY, party: sup.id, location: 'STORE', lines: [{ item: yarn.id, lot: ' mh 77/a ', qty: 10, rate: 200 }, { item: yarn.id, lot: '', qty: 5, rate: 200 }] });
+    ok(r.s === 201 && r.j.lines[0].lot === 'MH 77/A' && r.j.lines[0].lotCustom === true && r.j.lines[1].lot === nx[0] && !r.j.lines[1].lotCustom,
+      'a lot number typed on the line is used (in capitals); the line left blank gets the next automatic number: ' + JSON.stringify(r.j.lines ? r.j.lines.map(l => l.lot) : r.j.error));
+    let g = r.j;
+    r = await call('POST', '/api/grn', { date: TODAY, party: sup.id, location: 'STORE', lines: [{ item: yarn.id, lot: 'Mh 77/a', qty: 1, rate: 200 }] }); ok(r.s === 400 && /MH 77\/A is already used/.test(r.j.error), 'a lot number already used is refused: ' + r.j.error);
+    r = await call('POST', '/api/grn', { date: TODAY, party: sup.id, location: 'STORE', lines: [{ item: yarn.id, lot: 'A|B', qty: 1, rate: 200 }] }); ok(r.s === 400 && /letters, digits/.test(r.j.error), 'odd characters in a lot number are refused: ' + r.j.error);
+    r = await call('PUT', '/api/grn/' + g.id, g); ok(r.s === 200 && r.j.lines[0].lot === 'MH 77/A' && r.j.lines[0].lotCustom === true && r.j.lines[1].lot === nx[0], 'editing the GRN keeps both lot numbers'); g = r.j;
+    const high = nx[1].replace(/\d+(?!.*\d)/, m => '9'.repeat(m.length));
+    r = await call('POST', '/api/grn', { date: TODAY, party: sup.id, location: 'STORE', lines: [{ item: yarn.id, lot: high, qty: 2, rate: 200 }, { item: yarn.id, qty: 2, rate: 200 }] });
+    ok(r.s === 201 && r.j.lines[0].lot === high && r.j.lines[1].lot === nx[1], 'a typed ' + high + ' does not move the automatic numbers on: the next is still ' + (r.j.lines && r.j.lines[1].lot));
+    r = await call('POST', '/api/stockAdjust', { date: TODAY, location: 'STORE', reason: 'Opening Stock', lines: [{ item: yarn.id, lot: 'op-7', qty: 3, rate: 100 }] });
+    ok(r.s === 201 && r.j.lines[0].lot === 'OP-7' && r.j.lines[0].lotCustom === true, 'opening stock can start a lot with a typed number too: ' + (r.j.lines ? r.j.lines[0].lot : r.j.error));
+    r = await call('POST', '/api/stockAdjust', { date: TODAY, location: 'STORE', reason: 'Damage / Write-off', lines: [{ item: yarn.id, lot: 'MH 77/A', qty: -1 }] }); ok(r.s === 201, '1 kg of lot MH 77/A written off');
+    r = await call('PUT', '/api/grn/' + g.id, Object.assign({}, g, { lines: [Object.assign({}, g.lines[0], { lot: 'MH 78' }), g.lines[1]] }));
+    ok(r.s === 400 && /Lot MH 77\/A is already used in Stock Adjustment/.test(r.j.error), 'a lot already used further cannot be renamed: ' + r.j.error);
+    // the form checks a typed number before saving, to explain it in a pop-up
+    const chk = async (lot, self) => (await call('GET', '/api/report/lotCheck?lot=' + encodeURIComponent(lot) + '&date=' + TODAY + (self ? '&self=' + self : ''))).j;
+    { const a = await chk(' sm/4471 '), b = await chk('mh 77/a'), c = await chk('A|B'), e = await chk('MH 77/A', g.id);
+      ok(a.ok && a.lot === 'SM/4471' && a.next === nx[2], 'lot check: SM/4471 is new (next automatic ' + a.next + ')');
+      ok(!b.ok && b.problem === 'used' && /^GRN-\d+, Yarn A$/.test(b.usedIn), 'lot check: MH 77/A is already used in ' + b.usedIn);
+      ok(!c.ok && c.problem === 'format' && e.ok && e.own, 'lot check: "A|B" is not allowed; a GRN\'s own lot is fine when it is edited'); }
+    // a typed lot number goes everywhere the material goes
+    r = await call('POST', '/api/grn', { date: TODAY, party: sup.id, location: 'STORE', lines: [{ item: yarn.id, lot: 'sm/4471', qty: 30, rate: 200 }] }); ok(r.s === 201 && r.j.lines[0].lot === 'SM/4471', 'GRN with the supplier\'s lot SM/4471');
+    r = await call('POST', '/api/transfers', { date: TODAY, purpose: 'Yarn Issue', fromLoc: 'STORE', toLoc: KA, lines: [{ item: yarn.id, lot: 'SM/4471', qty: 30 }] }); ok(r.s === 201, 'yarn lot SM/4471 issued to the knitting agency ' + (r.j.error || ''));
+    r = await call('POST', '/api/knitting', { date: TODAY, location: KA, outLoc: DA, lines: [{ item: yarn.id, lot: 'SM/4471', qty: 30 }], outItem: grey.id, outQty: 28 });
+    ok(r.s === 201 && r.j.lotNo === 'SM/4471', 'knitting keeps lot SM/4471 for the grey fabric: ' + (r.j.lotNo || r.j.error));
+    r = await call('POST', '/api/dyeing', { date: TODAY, location: DA, outLoc: DA, lotNo: 'SM/4471', inItem: grey.id, inQty: 28, lines: [], outItem: col.id, outQty: 27 });
+    ok(r.s === 201 && r.j.lotNo === 'SM/4471', 'dyeing keeps lot SM/4471 ' + (r.j.error || ''));
+    r = await call('GET', '/api/report/stock?location=' + DA); ok(r.j.rows.some(x => x.lot === 'SM/4471' && x.category === 'Colored Fabric' && x.qty === 27), 'the dyed fabric is in stock as lot SM/4471');
+    r = await call('GET', '/api/report/lots'); ok(r.j.rows.some(x => x.lot === 'SM/4471'), 'and the lot tracking report follows SM/4471'); }
   r = await call('POST', '/api/transfers', { date: dayOff(-10), purpose: 'Yarn Issue', fromLoc: 'STORE', toLoc: KA, expectedQty: 48, jobRate: 9, expectedDate: dayOff(-2), lines: [{ item: yarn.id, lot: L2, qty: 50 }] }); ok(r.s === 201, 'yarn issued with an expected date two days ago');
   r = await call('GET', '/api/report/jobWork'); { const x = r.j.rows.find(y => y.lot === L2); ok(x && x.pending === 50 && x.status === 'Overdue 2 days' && r.j.cards[2].value >= 1, 'job work register: 50 kg still at the knitter, overdue 2 days: ' + JSON.stringify(x && [x.pending, x.status])); }
   r = await call('GET', '/api/report/dashboard'); ok(r.j.alerts.some(a => /job work send.*past the expected date/.test(a.text)), 'dashboard alert: job work late');

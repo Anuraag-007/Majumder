@@ -88,7 +88,7 @@ Now the two job-work agencies. **Masters → Parties → New party**:
 
 ✅ **Check:** 4 lines load by themselves with the PO quantities.
 
-✅ **Check:** the **Lot no** column shows *new on save* on the yarn line and *no lot* on the dye, soda and poly bag lines. You never type a lot number. Save → **GRN-0001**.
+✅ **Check:** the **Lot no** box on the yarn line shows **L-0001 (auto)** greyed, and the dye, soda and poly bag lines show *no lot*. Leave it blank (the automatic number is used; typing your own would replace it). Save → **GRN-0001**.
 
 ✅ **Check:** **Inventory → Stock Summary** shows Cotton Yarn 30s, lot **L-0001** (given by the GRN), **1,000 kg** at Main Store, value **2,50,000.00**.
 
@@ -309,6 +309,11 @@ Sign in as **admin**.
 13. Sign in as **admin** → **Admin → Approvals**: the request shows *amount 300 → 350* by accounts1. Click **Approve**.
     ✅ **Check:** the expense is now **350**, last edited by accounts1. **Activity Log** lists the sign-ins, the request and the approval.
 14. Untick the approval setting again.
+15. **Purchase → Goods Receipt (GRN) → New**: Shree Mills, item Y30, qty **10**, rate 250. In *Lot no* type **sm/4471** and press Tab.
+    ✅ **Check:** a pop-up *Your own lot number: SM/4471* explains that the number follows the yarn everywhere and that the automatic numbers carry on. Click **Use SM/4471**, Save.
+    ✅ **Check:** the message reads *Saved GRN-… · lot number SM/4471 (typed)*.
+16. Another **GRN → New**: Shree Mills, Y30, type **SM/4471** again.
+    ✅ **Check:** the pop-up says *Lot number SM/4471 is already used* (in the GRN above). Click **Use the automatic number**: the box goes back to the greyed automatic number. Leave without saving.
 
 ---
 
@@ -348,6 +353,6 @@ The same scenario runs automatically, with a browser signing in as each departme
 npm test
 ```
 
-It needs Node.js 22.13 or newer and Google Chrome or Microsoft Edge. It uses a temporary database, so your real data is never touched. It runs four checks in turn: the storage test (data and sign-ins survive restarts, old `db.json` import), the API rules (including cheque / UPI / bank transfer details, cheques counting only once cashed, split receipts, bank book and reconciliation, expenses, electricity bills, salary from attendance, salary privacy, EMIs, leads, quotations, godowns, lot number format, job work delays, processing status, GSTR-1 / 3B, approvals and the activity log), the two-tab sign-in test, and this department walkthrough. Each prints a pass/fail line for every check; the walkthrough ends with *ALL 137 CHECKS PASSED*.
+It needs Node.js 22.13 or newer and Google Chrome or Microsoft Edge. It uses a temporary database, so your real data is never touched. It runs four checks in turn: the storage test (data and sign-ins survive restarts, old `db.json` import), the API rules (including cheque / UPI / bank transfer details, cheques counting only once cashed, split receipts, bank book and reconciliation, expenses, electricity bills, salary from attendance, salary privacy, EMIs, leads, quotations, godowns, lot number format, job work delays, processing status, GSTR-1 / 3B, approvals and the activity log), the two-tab sign-in test, and this department walkthrough. Each prints a pass/fail line for every check; the walkthrough ends with *ALL 139 CHECKS PASSED*.
 
 It also checks, for every department login, that the menu, each screen and the server all agree on what that login may open or change: about 200 checks per login.
