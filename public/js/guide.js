@@ -226,7 +226,10 @@ const Guide = (() => {
         const h = catSupply(ctx, 'Grey Fabric', d.location);
         out.push(note('stop', 'No grey fabric waiting at ' + locName(d.location) + '. ' + h.text, h.screen));
       } else if (!d.lotNo) out.push(note('tip', 'Grey lots waiting at ' + locName(d.location) + ': ' + lotsWaiting(ctx, ['Grey Fabric'], d.location) + '.'));
-      if (stockOf(ctx, ['Dyes & Chemicals'], 'STORE').length && !Cache.list('boms').some(b => b.stage === 'Dyeing')) out.push(note('tip', 'If you supply the dyes and chemicals, save your recipes in Masters → BOM / Recipes: picking one fills the chemicals for the batch weight.', 'boms'));
+      if (stockOf(ctx, ['Dyes & Chemicals'], 'STORE').length && d.lotNo && !lotBomOf(d.lotNo) && !(d.lines || []).some(l => l.item))
+        out.push(note('tip', 'If you supply the dyes and chemicals: make a BOM for lot ' + d.lotNo + ' (Production → Lot BOM) and they fill in here for the batch weight. A dye recipe does the same for any lot.',
+          Perm.can('lotBoms', 'edit') ? { label: 'Make lot BOM', href: '#/edit/lotBoms/new' + U.qs({ lot: d.lotNo }) } : { ask: 'the Dyeing department' }));
+      else if (stockOf(ctx, ['Dyes & Chemicals'], 'STORE').length && !Cache.list('boms').some(b => b.stage === 'Dyeing')) out.push(note('tip', 'If you supply the dyes and chemicals, save your recipes in Masters → BOM / Recipes: picking one fills the chemicals for the batch weight.', 'boms'));
       out.push(noRate(d, 'Dyeing'));
       return out;
     },

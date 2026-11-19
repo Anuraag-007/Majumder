@@ -17,7 +17,7 @@ const ROOT = path.join(__dirname, '..');
 const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'erp-e2e-'));
 const SHOTS = path.join(WORK, 'screenshots');
 fs.mkdirSync(SHOTS);
-const PORT = 3997, CDP_PORT = 9337;
+const PORT = +process.env.E2E_PORT || 3997, CDP_PORT = +process.env.E2E_CDP_PORT || 9337;
 const BASE = 'http://localhost:' + PORT + '/';
 const TODAY = new Date().toISOString().slice(0, 10);
 
@@ -190,9 +190,9 @@ const SPOT = {
   purchase: { yes: ['purchaseOrders', 'purchaseBills', 'items', 'parties', 'boms'], no: ['knitting', 'dyeing', 'invoices', 'receipts', 'users'] },
   store: { yes: ['grn', 'yarnIssue', 'stockAdjust'], no: ['knitting', 'invoices', 'purchaseBills', 'payments'] },
   knitting: { yes: ['knitting', 'greyTransfer'], no: ['dyeing', 'finishing', 'invoices', 'grn', 'yarnIssue', 'purchaseOrders', 'labourPayments'] },
-  dyeing: { yes: ['dyeing'], no: ['knitting', 'finishing', 'invoices', 'purchaseOrders', 'receipts'] },
+  dyeing: { yes: ['dyeing', 'lotBoms'], no: ['knitting', 'finishing', 'invoices', 'purchaseOrders', 'receipts'] },
   finishing: { yes: ['finishing'], no: ['knitting', 'dyeing', 'invoices', 'grn'] },
-  sales: { yes: ['salesOrders', 'deliveries', 'invoices', 'priceList', 'customers'], no: ['knitting', 'purchaseBills', 'payments', 'overheads'] },
+  sales: { yes: ['salesOrders', 'deliveries', 'invoices', 'priceList', 'customers'], no: ['knitting', 'purchaseBills', 'payments', 'overheads', 'lotBoms'] },
   accounts: { yes: ['receipts', 'payments', 'labourPayments', 'purchaseBills', 'overheads', 'invoices'], no: ['knitting', 'dyeing', 'finishing', 'users', 'roles'] },
   manager: { yes: ['invoices', 'knitting', 'dyeing', 'grn', 'overheads', 'receipts'], no: ['users', 'roles'] },
 };
@@ -396,14 +396,15 @@ async function run() {
     if (r.sections.join() !== 'Knitting' || !r.charts || r.rupee || r.hero) throw new Error(JSON.stringify(r));
     return r.sections.join();
   });
-  await step('new knitting entry says where the yarn is; choosing Maa Tara Knitting fills its own rate ₹9/kg', async () => {
+  await step('new knitting entry says where the yarn is; choosing Maa Tara Knitting fills its own rate ₹9/kg and its only yarn lot L-0001', async () => {
     await openNew('knitting');
     const t = await guideText();
     if (!/Choose the knitting agency\. Yarn issued to agencies: Maa Tara Knitting \(L-0001 600 Kg\)/.test(t)) throw new Error('guide: ' + t);
     const r0 = await get('Job rate (₹/kg)');
     await fill('Agency / unit', 'Maa Tara Knitting');
     const lot = await get('Lot no'), rate = await get('Job rate (₹/kg)');
-    if (lot !== 'from the yarn lot' || r0 !== '8' || rate !== '9') throw new Error('lot no "' + lot + '", rate ' + r0 + ' then ' + rate);
+    const yl = await grid(0, 0, 'Yarn lot');
+    if (lot !== 'L-0001' || yl !== 'L-0001' || r0 !== '8' || rate !== '9') throw new Error('lot no "' + lot + '", yarn lot ' + yl + ', rate ' + r0 + ' then ' + rate);
     return 'process rate ' + r0 + ' → agency rate ' + rate;
   });
   await step('600 kg yarn → 585 kg grey; wastage (15 kg) and job charges (₹5,265) fill in; grey sent to Bengal Dyeing House', async () => {
@@ -428,21 +429,40 @@ async function run() {
   /* ---- Dyeing ---- */
   begin('7. Dyeing / Color Department: dyeing batch at the agency');
   await step('signs in', () => login('dyeing1', PASS));
-  await step('choosing Bengal Dyeing House keeps the dyed fabric there to finish; lot L-0001 fills 585 kg; Red recipe fills 11.7 kg dye + 58.5 kg soda', async () => {
+  await step('makes the BOM of lot L-0001: lot size fills from its stock; the Red recipe copied in (0.02 dye + 0.1 soda per kg) and 0.04 poly bags added', async () => {
+    await openNew('lotBoms');
+    await fill('Lot no', 'L-0001');
+    const kg = await get('Lot size (kg)');
+    const stock = (await api('/api/report/stock')).rows.filter(r => r.lot === 'L-0001').reduce((t, r) => t + r.qty, 0);
+    if (!(+kg > 0) || +kg !== stock) throw new Error('lot size ' + kg + ', the lot has ' + stock + ' kg in stock');
+    await fill('Fabric to make', 'FSJ'); await fill('Color', 'Red');
+    await fill('Copy materials from', 'Red Recipe');
+    const copied = [await grid(0, 0, 'Used in'), await grid(0, 0, 'Qty per kg'), await grid(0, 1, 'Qty per kg'), await ev(`T.rows(0)`)];
+    if (copied.join() !== 'Dyeing,0.02,0.1,2') throw new Error('copied ' + copied.join());
+    await addLine(0); await grid(0, 2, 'Item', 'POLY'); await grid(0, 2, 'Qty per kg', 0.04);
+    const used = await grid(0, 2, 'Used in'), whole = await grid(0, 0, 'For the whole lot'), cost = await get('Material cost per kg of fabric (₹)');
+    if (used !== 'Finishing' || +whole.replace(/,/g, '') !== +(0.02 * stock).toFixed(3) || cost !== '14.20') throw new Error('poly bags used in ' + used + ', dye for the lot ' + whole + ', cost per kg ' + cost);
+    await shot('07-lot-bom');
+    const h = await save();
+    if (h !== 'Lot BOM LB-0001') throw new Error('saved as ' + h);
+    return h + ': ' + kg + ' kg, dye ' + whole + ' kg for the lot, ₹' + cost + ' per kg';
+  });
+  await step('Bengal Dyeing House delivered 570 kg red of lot L-0001; a part-delivery leaves the rest of the lot pending (not wastage); the dyes it used (11.7 + 58.5 kg) are typed by hand; grey used (585 kg) and job charges (₹8,775) fill in', async () => {
     await openNew('dyeing');
     await fill('Agency / unit', 'Bengal Dyeing House');
     const to = await getText('Dyed fabric sent to');
     await fill('Grey fabric', 'GSJ'); await fill('Lot no', 'L-0001');
-    const q = await get('Input qty (kg)');
-    await fill('Dye recipe (BOM)', 'Red Recipe');
-    const a = await grid(0, 0, 'Qty'), b = await grid(0, 1, 'Qty');
-    if (to !== 'Bengal Dyeing House' || q !== '585' || a !== '11.7' || b !== '58.5') throw new Error('sent to ' + to + ', input ' + q + ', dye ' + a + ', soda ' + b);
-    return 'ok';
-  });
-  await step('585 kg grey → 570 kg red; wastage 15 kg, job charges ₹8,775 (585 × 15)', async () => {
-    await fill('Color', 'Red'); await fill('Colored fabric produced', 'CSJ'); await fill('Output qty (kg)', 570);
-    const w = await get('Wastage qty (kg)'), l = await get('Job charges (₹)');
-    if (w !== '15' || l !== '8775') throw new Error('wastage ' + w + ', charges ' + l);
+    await fill('Color', 'Red'); await fill('Colored fabric produced', 'CSJ');
+    // a part-delivery: only the dyed output's worth of grey is used; the rest of the lot stays pending, not wastage
+    await fill('Output qty (kg)', 200);
+    const part = [await get('Grey fabric used (kg)'), await get('Grey of this lot still at the agency after this (kg)')];
+    if (part.join('|') !== '200|385') throw new Error('part delivery should leave grey pending, not wastage: grey used / still at agency = ' + part.join(' / '));
+    // the real delivery: 570 kg red with 15 kg wastage -> 585 kg grey used, nothing left of the lot
+    await fill('Output qty (kg)', 570); await fill('Wastage qty (kg)', 15);
+    await grid(0, 0, 'Item', 'DRED'); await grid(0, 0, 'Qty', 11.7);
+    await addLine(0); await grid(0, 1, 'Item', 'SODA'); await grid(0, 1, 'Qty', 58.5);
+    const q = await get('Grey fabric used (kg)'), l = await get('Job charges (₹)');
+    if (to !== 'Bengal Dyeing House' || q !== '585' || l !== '8775') throw new Error('sent to ' + to + ', grey used ' + q + ', charges ' + l);
     await shot('07-dyeing');
     return save();
   });
@@ -463,11 +483,13 @@ async function run() {
   /* ---- Finishing ---- */
   begin('8. Finishing & Packing: finish and pack into finished goods');
   await step('signs in', () => login('finishing1', PASS));
-  await step('570 kg dyed → 560 kg finished at Bengal Dyeing House: 24 rolls weighed one by one (23 × 23.3 + 24.1 kg), 2200 m, 24 poly bags', async () => {
+  await step('570 kg dyed → 560 kg finished at Bengal Dyeing House: 24 rolls weighed one by one (23 × 23.3 + 24.1 kg), 2200 m, 24 poly bags (the lot\'s BOM filled 22.8)', async () => {
     await openNew('finishing');
     await fill('Agency / unit', 'Bengal Dyeing House');
     await fill('Colored fabric', 'CSJ'); await fill('Lot', 'L-0001');
     if (await get('Input qty (kg)') !== '570') throw new Error('input qty not filled');
+    const bomPoly = await grid(0, 0, 'Qty'), fabric = await getText('Finished goods produced');
+    if (bomPoly !== '22.8' || !/Finished Single Jersey/.test(fabric)) throw new Error('the lot BOM gave ' + bomPoly + ' poly bags and ' + fabric);
     await grid(0, 0, 'Item', 'POLY'); await grid(0, 0, 'Qty', 24);
     await fill('Finished goods produced', 'FSJ');
     await fill('Roll weights (kg)', Array(23).fill('23.3').concat('24.1').join(' + '));
@@ -477,6 +499,17 @@ async function run() {
     const w = await get('Wastage qty (kg)'), l = await get('Job charges (₹)');
     if (w !== '10' || l !== '3360') throw new Error('wastage ' + w + ', charges ' + l);
     return save();
+  });
+  await step('Lot BOM vs Actual: dye and soda as per BOM; 24 poly bags against 22.8 is over the BOM; a line opens the BOM', async () => {
+    const t = (await api('/api/report/bomVsActual?lot=L-0001')).tables[0], by = n => t.rows.find(r => r.item === n) || {};
+    const d = by('Reactive Red'), s = by('Soda Ash'), p = by('Poly Bag');
+    if (t.rows.length !== 3 || d.status !== 'As per BOM' || d.got !== 11.7 || s.status !== 'As per BOM' || p.want !== 22.8 || p.got !== 24 || p.pct !== 5.26 || p.status !== 'Over BOM') throw new Error(JSON.stringify(t.rows.map(r => [r.item, r.want, r.got, r.status])));
+    await go('#/report/bomVsActual');
+    if (!(await waitFor(`[...document.querySelectorAll('.view table.report .badge')].some(b => b.textContent === 'Over BOM' && b.classList.contains('bad'))`))) throw new Error('no red "Over BOM" badge');
+    await shot('08-bom-vs-actual');
+    const h = await ev(`(async () => { const tr = [...document.querySelectorAll('.view table.report tbody tr')].find(r => /Poly Bag/.test(r.textContent)); tr.click(); for (let i = 0; i < 100 && !/^Lot BOM LB-0001/.test(T.h1()); i++) await new Promise(r => setTimeout(r, 30)); return T.h1(); })()`);
+    if (h !== 'Lot BOM LB-0001') throw new Error('clicking the line opened ' + h);
+    return 'poly bags ' + p.got + ' against ' + p.want + ' (+' + p.pct + '%)';
   });
   await checkAccess('finishing');
 
@@ -854,6 +887,80 @@ async function run() {
     const box = await grid(0, 0, 'Lot no');
     await go('#/dashboard');
     return t2 === 'Lot number SM/4471 is already used' && /already used in GRN-\d+, Cotton Yarn 30s/.test(why) && box === '' ? 'saved: "' + saved + '"; second time: "' + t2 + '", box back to automatic' : false;
+  });
+  await step('item master: opening stock brought over from the old software, its typed lot number explained in a pop-up', async () => {
+    await openNew('items'); await fill('Item code', 'Y40'); await fill('Item name', 'Old Cotton Yarn 40s'); await fill('Category', 'Yarn'); await fill('Unit', 'Kg - ');
+    await fill('Standard rate (₹)', 240); await fill('Opening stock qty', 200);
+    const rate = await get('Rate (₹ per unit)');
+    if (!(await waitFor(`/^L-\\d{4} \\(auto\\)$/.test(T.field('Lot no').querySelector('input').placeholder)`))) throw new Error('no automatic lot number in the box');
+    const auto = await ev(`T.field('Lot no').querySelector('input').placeholder`);
+    await fill('Lot no', 'old/40');
+    if (!(await waitFor(`!!document.querySelector('.modal')`))) throw new Error('no pop-up');
+    const title = await ev(`document.querySelector('.modal h3').textContent`);
+    await ev(`[...document.querySelectorAll('.modal-actions button')].find(b => b.textContent === 'Use OLD/40').click()`); await sleep(300);
+    await save();
+    const saved = await ev(`document.getElementById('toasts').textContent`);
+    const s = (await api('/api/report/stock?location=STORE')).rows.find(r => r.item === 'Old Cotton Yarn 40s');
+    if (rate !== '240' || title !== 'Your own lot number: OLD/40' || !/opening stock lot number OLD\/40 \(typed\)/.test(saved) || !s || s.lot !== 'OLD/40' || s.qty !== 200 || s.value !== 48000)
+      throw new Error(JSON.stringify({ rate, auto, title, saved, s }));
+    return 'rate ₹240 filled from the standard rate; box showed "' + auto + '"; pop-up "' + title + '"; "' + saved + '"; Main Store: 200 kg in lot OLD/40 worth ₹48,000';
+  });
+  await step('salesman: a customer\'s salesman fills in on a receipt paid on the card machine; collections and the dispatch log show it', async () => {
+    await openNew('salesmen'); await fill('Salesman name', 'Rajesh Roy'); await fill('Phone / mobile', '98305 67890'); await fill('Area / territory', 'Central Kolkata & Howrah market'); await save();
+    const kg = (await api('/api/parties')).find(p => p.name === 'Kolkata Garments');
+    // saving an existing party stays on the same page: wait for "Saved"
+    await go('#/edit/parties/' + kg.id); await fill('Salesman', 'Rajesh Roy');
+    await ev(`document.getElementById('toasts').innerHTML = ''`); await ev(`T.btn('Save')`);
+    if (!(await waitFor(`/Saved/.test(document.getElementById('toasts').textContent) || !!T.toastErr()`))) throw new Error('no answer to saving the party');
+    { const err = await ev('T.toastErr()'); if (err) throw new Error('party not saved: ' + err); }
+    await openNew('receipts'); await fill('Customer', 'Kolkata Garments'); await sleep(300);
+    const sm = await getText('Salesman');
+    await fill('Mode', 'Card (EDC / POS)'); await fill('Amount received (₹)', 1000); await fill('Card (last 4 digits)', 'Visa 4321'); await fill('Approval / slip no', '845120');
+    await save();
+    const rc = (await api('/api/receipts')).find(r => r.mode === 'Card (EDC / POS)');
+    await go('#/report/collections');
+    if (!(await waitFor(`!!document.querySelector('.view .table-head')`))) throw new Error('collections did not load');
+    const card = await ev(`(() => { const t = document.querySelector('.view table.report'); const c = [...t.querySelectorAll('thead th')].map(x => x.textContent).indexOf('Card (EDC / POS)');
+      const r = [...t.querySelectorAll('tbody tr')].find(x => x.textContent.includes('Rajesh Roy')); return r ? r.cells[c].textContent : ''; })()`);
+    await go('#/report/dispatchLog?from=2000-01-01');
+    if (!(await waitFor(`!!document.querySelector('.view .table-head')`))) throw new Error('dispatch log did not load');
+    const chip = await ev(`document.querySelector('.view .table-head .badge').textContent`), lot = await ev(`(document.querySelector('.view .cell-sub.lot') || {}).textContent || ''`);
+    const rr = (await api('/api/salesmen')).find(s => s.name === 'Rajesh Roy');
+    if (!/^Rajesh Roy/.test(sm) || !rc || !rr || rc.salesman !== rr.id || card !== '1,000.00' || !/invoices? · [\d,.]+ kg · \d+ rolls/.test(chip) || !/^Lot L-\d{4} · /.test(lot))
+      throw new Error(JSON.stringify({ sm, rc: rc && [rc.salesman, rc.card, rc.refNo], card, chip, lot }));
+    await go('#/dashboard');
+    return 'receipt salesman "' + sm + '", card ₹' + card + ' (' + rc.card + ', approval ' + rc.refNo + '); dispatch log: ' + chip + ', first lot "' + lot + '"';
+  });
+  await step('knitting delivered in parts: 200 kg of lot OLD/40 given; 60 kg grey (2.5% expected), 80 kg (3% typed), then the last 52 kg uses up the rest; Knitting Deliveries adds it up', async () => {
+    await openNew('yarnIssue'); await fill('Knitting agency', 'Maa Tara Knitting');
+    await grid(0, 0, 'Item', 'Y40'); await grid(0, 0, 'Yarn lot', 'OLD/40'); await grid(0, 0, 'Qty', 200);
+    if (await get('Expected grey fabric (kg)') !== '195') throw new Error('expected grey ' + await get('Expected grey fabric (kg)'));
+    await save();
+    const part = async (grey, more) => {
+      await openNew('knitting'); await fill('Agency / unit', 'Maa Tara Knitting');
+      const lot = await grid(0, 0, 'Yarn lot');
+      if (!(await waitFor(`T.get('This yarn lot at the agency').includes('OLD/40: 200 kg of yarn given')`))) throw new Error('no yarn lot line: ' + await get('This yarn lot at the agency'));
+      const info = await get('This yarn lot at the agency');
+      await fill('Grey fabric produced', 'GSJ'); await fill('Output qty (kg)', grey);
+      if (more) await more();
+      const r = { lot, info, yarn: await grid(0, 0, 'Qty'), kg: await get('Wastage qty (kg)'), pct: await get('Wastage %') };
+      await fill('Grey fabric sent to', 'Maa Tara Knitting');
+      await save();
+      return r;
+    };
+    const a = await part(60);
+    const b = await part(80, () => fill('Wastage %', 3));
+    const c = await part(52, async () => { await tick('Last delivery'); await sleep(200); });
+    const want = [['OLD/40', 'no delivery yet', '61.538', '1.538', '2.5'], ['OLD/40', '1 delivery before this: 60 kg grey from 61.538 kg yarn, wastage 1.538 kg (2.50%)', '82.474', '2.474', '3'],
+      ['OLD/40', '2 deliveries before this: 140 kg grey from 144.012 kg yarn, wastage 4.012 kg (2.79%)', '55.988', '3.988', '7.12']];
+    [a, b, c].forEach((x, i) => { const w = want[i]; if (x.lot !== w[0] || !x.info.includes(w[1]) || x.yarn !== w[2] || x.kg !== w[3] || x.pct !== w[4]) throw new Error('delivery ' + (i + 1) + ': ' + JSON.stringify(x)); });
+    await go('#/report/knitDeliveries?lot=OLD%2F40&all=1');
+    if (!(await waitFor(`!!document.querySelector('.view table.report tbody tr .cell-lines')`))) throw new Error('report did not load');
+    const row = await ev(`(() => { const t = document.querySelector('.view table.report'); const h = [...t.querySelectorAll('thead th')].map(x => x.textContent); const r = t.querySelector('tbody tr');
+      const at = k => r.cells[h.indexOf(k)].textContent; return { given: at('Yarn given (kg)'), grey: at('Grey received (kg)'), waste: at('Wastage (kg)'), pct: at('Wastage %'), left: at('Yarn still there (kg)'), status: at('Status'), n: r.querySelectorAll('.cell-lines > div').length }; })()`);
+    await shot('12b-knitting-deliveries');
+    if (!/^200from \d{2}-\d{2}-\d{4}$/.test(row.given) || !/^192from 200 kg yarn$/.test(row.grey) || row.waste !== '8' || row.pct !== '4.00%' || row.left !== '–' || row.status !== 'Completed' || row.n !== 3) throw new Error(JSON.stringify(row));
+    return 'yarn ' + [a, b, c].map(x => x.yarn + ' kg (wastage ' + x.kg + ' kg = ' + x.pct + '%)').join(', ') + '; report: 192 kg grey from 200 kg, wastage 8 kg = 4.00%, completed';
   });
   await step('activity log shows who did what', async () => {
     await go('#/report/activity');

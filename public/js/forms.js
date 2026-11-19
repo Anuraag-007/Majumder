@@ -24,7 +24,7 @@ function displayValue(f, v) {
     const r = Cache.byId(f.ref, v);
     if (!r) return v;
     if (DOC_COLS.has(f.ref)) return r.no || '';
-    if (f.ref === 'items' || f.ref === 'parties' || f.ref === 'locations' || f.ref === 'processes' || f.ref === 'boms') return r.name;
+    if (f.ref === 'items' || f.ref === 'parties' || f.ref === 'locations' || f.ref === 'processes' || f.ref === 'boms' || f.ref === 'salesmen') return r.name;
     if (f.ref === 'machines') return r.code;
     if (f.ref === 'units') return r.code;
     return refLabel(f.ref, r);
@@ -38,6 +38,8 @@ function displayValue(f, v) {
 }
 // Fields and blocks with `show` appear only when it says so (e.g. "To account" only for transfers).
 const shown = (f, doc) => !f.show || f.show(doc);
+// A name inside a sentence: "New lot BOM", "No goods receipt (GRN) yet" (short forms stay in capitals).
+const inText = t => t.replace(/\b[A-Z][a-z]+/g, w => w.toLowerCase());
 
 /* ================================================================== */
 /* LIST                                                                */
@@ -83,7 +85,7 @@ async function renderList(main, key, query) {
     } else if (s.isDoc) rows.sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.no || '').localeCompare(a.no || ''));
     else rows.sort((a, b) => String(a.name || a.code || a.username || '').localeCompare(String(b.name || b.code || b.username || '')));
     tbody.innerHTML = '';
-    if (!rows.length) tbody.appendChild(h('tr', null, h('td', { colspan: cols.length, class: 'empty' }, all.length ? 'No records match the filters.' : 'No ' + s.title.toLowerCase() + ' yet. Click "New" to add one.')));
+    if (!rows.length) tbody.appendChild(h('tr', null, h('td', { colspan: cols.length, class: 'empty' }, all.length ? 'No records match the filters.' : 'No ' + inText(s.title) + ' yet. Click "New" to add one.')));
     rows.slice(0, state.limit).forEach(r => tbody.appendChild(h('tr', { class: 'click', tabindex: 0, onclick: () => { location.hash = '#/edit/' + key + '/' + r.id; }, onkeydown: e => { if (e.key === 'Enter') location.hash = '#/edit/' + key + '/' + r.id; } },
       cols.map(c => h('td', { class: c.fmt && c.fmt !== 'date' ? 'num' : '' }, c.get(r))))));
     foot.innerHTML = '';
@@ -101,7 +103,7 @@ async function renderList(main, key, query) {
   const canCreate = Perm.can(s.area, 'edit');
   main.append(
     pageHead(s.title, s.note, [
-      canCreate ? h('a', { class: 'btn primary', href: '#/edit/' + key + '/new' }, icon('plus', 16), 'New ' + s.singular.toLowerCase()) : null,
+      canCreate ? h('a', { class: 'btn primary', href: '#/edit/' + key + '/new' }, icon('plus', 16), 'New ' + inText(s.singular)) : null,
     ]),
     h('div', { class: 'toolbar' },
       h('label', { class: 'search' }, icon('search', 16), h('input', { type: 'search', placeholder: 'Search…', value: state.q, 'aria-label': 'Search', oninput: U.debounce(e => { state.q = e.target.value; draw(); }, 150) })),
@@ -234,7 +236,7 @@ async function renderForm(main, key, id, query) {
       ctx.rerender();
     },
     refresh() {
-      if (s.recalc) s.recalc(doc);
+      if (s.recalc) s.recalc(doc, ctx);
       for (const b of ctx.bindings) if (b.el !== document.activeElement && b.el.isConnected) { const v = b.obj[b.k]; const nv = isEmpty(v) ? '' : String(v); if (b.el.value !== nv) b.el.value = nv; }
       for (const c of ctx.calcs) if (c.el.isConnected || !form.isConnected) c.el.textContent = c.fn(); // first fill runs before the form is on the page
       renderGuide();
@@ -244,7 +246,7 @@ async function renderForm(main, key, id, query) {
       const sc = document.getElementById('main') || document.scrollingElement;
       const y = sc.scrollTop;
       ctx.bindings = []; ctx.calcs = [];
-      if (s.recalc) s.recalc(doc);
+      if (s.recalc) s.recalc(doc, ctx);
       form.replaceChildren(...buildBlocks());
       ctx.refresh();
       if (ctx.readOnly) form.querySelectorAll('input, select, textarea, button').forEach(el => { el.disabled = true; });
@@ -303,7 +305,8 @@ async function renderForm(main, key, id, query) {
         return h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: !!get(), onchange: e => { obj[f.k] = e.target.checked; afterChange(); } }), ' ', f.label);
       case 'select': {
         const opts = (typeof f.options === 'function' ? f.options(doc, ctx) : f.options).map(o => Array.isArray(o) ? o : [o, o]);
-        return bind(h('select', { 'aria-label': label, onchange: e => { obj[f.k] = e.target.value; afterChange(); } },
+        // `free`: the search box also offers what was typed, e.g. "Lot: 0987"
+        return bind(h('select', { 'aria-label': label, 'data-free': f.free || null, onchange: e => { obj[f.k] = e.target.value; afterChange(); } },
           h('option', { value: '' }, '—'), opts.map(([v, l]) => h('option', { value: v, selected: v === get() }, l))));
       }
       case 'perms': {
@@ -347,7 +350,7 @@ async function renderForm(main, key, id, query) {
       }
       case 'lotNew': {
         // A new lot: blank = the next automatic number (shown greyed); type your own to use it instead.
-        if (!obj.item || !f.tracked(obj)) return h('div', { class: 'calc' }, obj.item ? 'no lot' : '');
+        if (!f.tracked(obj, doc)) return h('div', { class: 'calc' }, obj.item ? 'no lot' : '');
         return bind(h('input', { type: 'text', 'aria-label': label, class: 'lot-no', value: get() || '', placeholder: f.auto(obj, doc, ctx), maxlength: 30,
           oninput: e => { obj[f.k] = e.target.value; afterInput(); }, onchange: () => { if (f.onChange) f.onChange(obj, doc, ctx); } }));
       }
@@ -474,7 +477,7 @@ async function renderForm(main, key, id, query) {
   }
 
   async function remove() {
-    if (!(await confirmBox('Delete this ' + s.singular.toLowerCase() + (doc.no ? ' ' + doc.no : '') + '? This cannot be undone.', 'Delete', true))) return;
+    if (!(await confirmBox('Delete this ' + inText(s.singular) + (doc.no ? ' ' + doc.no : '') + '? This cannot be undone.', 'Delete', true))) return;
     try { const r = await API.del('/api/' + s.col + '/' + doc.id); Cache.invalidate(s.col); toast(r && r.pending ? r.message : 'Deleted'); location.hash = '#/list/' + key; }
     catch (e) { toast(e.message, 'err'); }
   }
@@ -483,10 +486,12 @@ async function renderForm(main, key, id, query) {
   const canEdit = Perm.can(s.area, 'edit') && Perm.can(S.areaOf(s.col, doc), 'edit');
   const canDelete = !isNew && canEdit && Perm.can(S.areaOf(s.col, doc), 'full') && !doc.system;
   ctx.readOnly = !canEdit;
-  const title = (isNew ? 'New ' + s.singular.toLowerCase() : s.singular + ' ' + (doc.no || doc.name || doc.code || doc.username || ''));
+  const title = (isNew ? 'New ' + inText(s.singular) : s.singular + ' ' + (doc.no || doc.name || doc.code || doc.username || ''));
   main.append(
     pageHead(title, s.note, [
       h('a', { class: 'btn ghost', href: '#/list/' + key }, icon('back', 16), s.title),
+      // pages that go with a saved entry, e.g. a lot BOM's "Lot BOM vs Actual"
+      !isNew && s.formLinks ? s.formLinks(doc).map(([label, href]) => h('a', { class: 'btn', href }, icon('chart', 16), label)) : null,
       !isNew && s.isDoc ? h('button', { class: 'btn', onclick: () => printDoc(s, doc) }, icon('print', 16), 'Print') : null,
       canDelete ? h('button', { class: 'btn danger-ghost', onclick: remove }, 'Delete') : null,
       canEdit ? h('button', { class: 'btn', onclick: () => save(true) }, 'Save & new') : null,

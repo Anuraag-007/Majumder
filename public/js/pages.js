@@ -59,6 +59,7 @@ const FILTERS = {
   zero: { p: 'zero', label: 'Show zero stock', type: 'check' },
   all: { p: 'all', label: 'Include completed', type: 'check' },
   godown: { p: 'location', label: 'Godown', type: 'ref', ref: 'locations', filter: l => S.isGodown(l) },
+  salesman: { p: 'salesman', label: 'Salesman', type: 'ref', ref: 'salesmen', extra: [['none', 'No salesman']] },
   customerPick: { p: 'party', label: 'Customer', type: 'ref', ref: 'parties', filter: p => S.partyIs(p, 'Customer'), choose: true },
   account: { p: 'account', label: 'Account', type: 'ref', ref: 'banks', allLabel: 'All accounts (balances)' },
   bankAccount: { p: 'account', label: 'Bank account', type: 'ref', ref: 'banks', filter: b => b.type === 'Bank', choose: true },
@@ -73,39 +74,60 @@ const FILTERS = {
 // Colour of a status badge in a report, from its text.
 function flagClass(v) {
   const t = String(v);
-  if (/overdue|over limit|below|short|due today|check gstin|^🔴/i.test(t)) return 'bad';
-  if (/due in|unpaid|part |part$|not yet|not cashed|^🟠|no date|^🟡/i.test(t)) return 'warn';
+  if (/overdue|over limit|over bom|below|short|due today|check gstin|^🔴/i.test(t)) return 'bad';
+  if (/due in|unpaid|part |part$|not yet|not cashed|under bom|not used|not in bom|^🟠|no date|^🟡/i.test(t)) return 'warn';
   if (/sold|closed|used up|lost/i.test(t)) return 'muted-b';
-  if (/^paid|^🟢|^✅|completed|received|^cashed|^won|^ok$/i.test(t)) return 'ok';
+  if (/^paid|^🟢|^✅|completed|received|^cashed|^won|^ok$|as per bom/i.test(t)) return 'ok';
   return 'info';
 }
 
+// Cells can carry more than one figure: `sub` names a second, smaller line (a customer's city under the
+// name), 'lines' stacks several { t, sub } (fabric and lot of each line), 'tags' shows several badges.
+// `tone` colours a column's figures; `dash` shows a dash for nothing (0); `wrap` lets long text wrap.
 function reportTable(t) {
   const cols = t.columns;
   const numeric = c => ['money', 'qty', 'int', 'pct'].includes(c.type);
   const sums = cols.map(c => c.sum ? t.rows.reduce((s, r) => s + (+r[c.k] || 0), 0) : null);
-  const cell = (c, v) => {
+  const cell = (c, v, r) => {
     if (c.type === 'flag') return v ? h('span', { class: 'badge ' + flagClass(v) }, v) : '';
-    return U.fmt(c.type, v);
+    if (c.type === 'tags') return h('span', { class: 'tags' }, (v || []).map(x => h('span', { class: 'badge ' + flagClass(x) }, x)));
+    if (c.type === 'lines') return h('div', { class: 'cell-lines' }, (v || []).map(x => h('div', null, h('span', { class: 'cell-main' }, x.t), x.sub ? h('span', { class: 'cell-sub lot' }, x.sub) : null)));
+    if (c.dash && !+v) return h('span', { class: 'muted' }, '–');
+    const main = U.fmt(c.type, v);
+    return c.sub && r[c.sub] ? h('div', { class: 'cell-two' }, h('span', { class: 'cell-main' }, main), h('span', { class: 'cell-sub' }, r[c.sub])) : main;
   };
+  const cls = c => [numeric(c) || c.align === 'num' ? 'num' : '', c.tone ? 'tone-' + c.tone : '', c.type === 'lines' || c.wrap ? 'wrap' : ''].filter(Boolean).join(' ');
   return h('div', { class: 'table-wrap' }, h('table', { class: 'data report' },
-    h('thead', null, h('tr', null, cols.map(c => h('th', { class: numeric(c) ? 'num' : '' }, c.label)))),
+    h('thead', null, h('tr', null, cols.map(c => h('th', { class: cls(c) }, c.label)))),
     h('tbody', null, t.rows.length ? t.rows.map(r => h('tr', r._link ? { class: 'click', tabindex: 0, onclick: () => { location.hash = r._link; }, onkeydown: e => { if (e.key === 'Enter') location.hash = r._link; } } : null,
-      cols.map(c => h('td', { class: numeric(c) ? 'num' : '' }, cell(c, r[c.k]))))) : h('tr', null, h('td', { colspan: cols.length || 1, class: 'empty' }, 'No data for these filters.'))),
-    sums.some(x => x !== null) && t.rows.length > 1 ? h('tfoot', null, h('tr', null, cols.map((c, i) => h('td', { class: numeric(c) ? 'num' : '' }, i === 0 ? 'Total' : sums[i] === null ? '' : U.fmt(c.type, sums[i]))))) : null));
+      cols.map(c => h('td', { class: cls(c) }, cell(c, r[c.k], r))))) : h('tr', null, h('td', { colspan: cols.length || 1, class: 'empty' }, 'No data for these filters.'))),
+    sums.some(x => x !== null) && t.rows.length > 1 ? h('tfoot', null, h('tr', null, cols.map((c, i) => h('td', { class: cls(c) }, i === 0 ? t.totalLabel || 'Total' : sums[i] === null ? (t.totals || {})[c.k] || '' : c.dash && !sums[i] ? '–' : U.fmt(c.type, sums[i]))))) : null));
+}
+// A table's heading: title, a line about it, a summary chip ("3 invoices · 1,870 kg · 89 rolls") and a PDF button.
+function tableHead(t) {
+  if (!t.note && !t.chip && !t.pdf) return t.title ? h('h3', { class: 'pad' }, t.title) : null;
+  return h('div', { class: 'table-head pad' },
+    h('div', null, t.title ? h('h3', null, t.title) : null, t.note ? h('p', { class: 'muted' }, t.note) : null),
+    h('div', { class: 'actions' },
+      t.pdf ? h('button', { class: 'btn primary small', title: 'Opens the print window: choose "Save as PDF" as the printer', onclick: () => { toast('Choose "Save as PDF" as the printer'); setTimeout(() => window.print(), 300); } }, icon('down', 14), t.pdf) : null,
+      t.chip ? h('span', { class: 'badge info big' }, t.chip) : null));
 }
 
 function toCsv(tables) {
   const q = v => { const s = v === undefined || v === null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-  return tables.map(t => [t.title ? q(t.title) : null, t.columns.map(c => q(c.label)).join(','), ...t.rows.map(r => t.columns.map(c => q(r[c.k])).join(','))].filter(x => x !== null).join('\n')).join('\n\n');
+  // a cell with more than one figure goes in one line: "Kolkata Garments (Kolkata)", "Single Jersey Lot L-0001 · 500 kg; ..."
+  const val = (c, r) => { const v = r[c.k]; if (Array.isArray(v)) return v.map(x => x && typeof x === 'object' ? [x.t, x.sub].filter(Boolean).join(' ') : x).join('; '); return c.sub && r[c.sub] ? v + ' (' + r[c.sub] + ')' : v; };
+  return tables.map(t => [t.title ? q(t.title) : null, t.columns.map(c => q(c.label)).join(','), ...t.rows.map(r => t.columns.map(c => q(val(c, r))).join(','))].filter(x => x !== null).join('\n')).join('\n\n');
 }
 
 async function renderReport(main, name, query) {
   const def = REPORTS[name];
   if (!def) return renderNotFound(main);
   if (!Perm.report(name)) return renderDenied(main);
-  await Cache.load(['items', 'parties', 'locations', 'units', 'banks']);
+  await Cache.load(['items', 'parties', 'locations', 'units', 'banks', 'salesmen']);
   const q = Object.assign({}, query);
+  // daily reports open on today
+  if (def.today && !q.from && !q.to) { q.from = q.to = U.today(); history.replaceState(null, '', '#/report/' + name + U.qs(q)); }
   if (name === 'stock' && !q.group) q.group = 'lot';
   if (name === 'outstanding' && !q.type) q.type = 'receivable';
 
@@ -120,7 +142,8 @@ async function renderReport(main, name, query) {
     else if (f.type === 'select') ctl = h('select', { onchange: e => setQ(f.p, e.target.value) }, f.noAll ? null : h('option', { value: '' }, 'All'), f.options.map(([v, l]) => h('option', { value: v, selected: (q[f.p] || '') === v }, l)));
     else {
       const opts = Cache.list(f.ref).filter(r => !f.filter || f.filter(r)).sort((a, b) => refLabel(f.ref, a).localeCompare(refLabel(f.ref, b)));
-      ctl = h('select', { onchange: e => setQ(f.p, e.target.value) }, h('option', { value: '' }, f.choose || name === 'stockLedger' || name === 'partyLedger' ? '— choose —' : f.allLabel || 'All'), opts.map(r => h('option', { value: r.id, selected: q[f.p] === r.id }, refLabel(f.ref, r))));
+      ctl = h('select', { onchange: e => setQ(f.p, e.target.value) }, h('option', { value: '' }, f.choose || name === 'stockLedger' || name === 'partyLedger' ? '— choose —' : f.allLabel || 'All'),
+        (f.extra || []).map(([v, l]) => h('option', { value: v, selected: q[f.p] === v }, l)), opts.map(r => h('option', { value: r.id, selected: q[f.p] === r.id }, refLabel(f.ref, r))));
     }
     return h('label', { class: 'filter' }, h('span', null, f.label), ctl);
   };
@@ -131,11 +154,12 @@ async function renderReport(main, name, query) {
   let last = null;
   const presets = h('div', { class: 'presets' },
     def.filters.includes('from') ? [
+      ['Today', U.today(), U.today()],
       ['This month', U.monthStart(), U.today()],
       ['Last month', (() => { const d = new Date(); d.setDate(0); return d.toISOString().slice(0, 8) + '01'; })(), (() => { const d = new Date(); d.setDate(0); return d.toISOString().slice(0, 10); })()],
       ['This FY', (() => { const d = new Date(); const y = d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1; return y + '-04-01'; })(), U.today()],
-      ['All time', '', ''],
-    ].map(([l, f, t]) => h('button', { class: 'chip', onclick: () => { if (f) q.from = f; else delete q.from; if (t) q.to = t; else delete q.to; location.hash = '#/report/' + name + U.qs(q); } }, l)) : null);
+      def.today ? null : ['All time', '', ''],
+    ].filter(Boolean).map(([l, f, t]) => h('button', { class: 'chip', onclick: () => { if (f) q.from = f; else delete q.from; if (t) q.to = t; else delete q.to; location.hash = '#/report/' + name + U.qs(q); } }, l)) : null);
 
   async function load() {
     body.replaceChildren(h('p', { class: 'muted' }, 'Loading…'));
@@ -148,7 +172,7 @@ async function renderReport(main, name, query) {
       // Optional headline figures above the tables.
       const cards = r.cards && r.cards.length ? h('div', { class: 'kpis' }, r.cards.map(c => h('div', { class: 'kpi' },
         h('span', { class: 'kpi-label' }, c.label), h('span', { class: 'kpi-value' }, c.type === 'money' ? U.rupee(c.value) : U.fmt(c.type, c.value)), c.sub ? h('span', { class: 'kpi-sub' }, c.sub) : null))) : null;
-      body.replaceChildren(...[cards].concat(tables.map(t => h('section', { class: 'card flush' }, t.title ? h('h3', { class: 'pad' }, t.title) : null, t.columns.length ? reportTable(t) : h('p', { class: 'pad muted' }, r.note || 'Choose filters above.')))).filter(Boolean));
+      body.replaceChildren(...[cards].concat(tables.map(t => h('section', { class: 'card flush' }, tableHead(t), t.columns.length ? reportTable(t) : h('p', { class: 'pad muted' }, r.note || 'Choose filters above.')))).filter(Boolean));
     } catch (e) { body.replaceChildren(h('div', { class: 'banner err' }, e.message)); }
   }
 

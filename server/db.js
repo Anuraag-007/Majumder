@@ -41,6 +41,10 @@ const COLLECTIONS = [
   // added with CRM, accounts, staff and approvals
   'leads', 'quotations', 'jobStatus', 'banks', 'bankEntries', 'employees', 'attendance', 'salary', 'loans', 'emiPayments', 'powerBills',
   'approvals',
+  // added with salesmen
+  'salesmen',
+  // added with lot BOMs
+  'lotBoms',
 ];
 
 const DEFAULT_SETTINGS = {

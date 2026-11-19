@@ -124,6 +124,7 @@ async function route() {
       case 'approvals': await renderApprovals(target); break;
       case 'report': await renderReport(target, parts[1], query); break;
       case 'reports': renderReportsHub(target); break;
+      case 'support': RemoteSupport.render(target); break;
       case 'settings': await renderSettings(target); break;
       default: renderNotFound(target);
     }

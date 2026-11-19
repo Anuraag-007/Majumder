@@ -162,6 +162,7 @@ const ok = (c, msg) => { if (!c) fails++; console.log((c ? 'PASS ' : 'FAIL ') + 
 
   // ---- department logins ----
   r = await call('GET', '/api/roles'); ok(r.j.length === 9 && r.j.some(x => x.id === 'knitting'), 'preset department roles exist: ' + r.j.map(x => x.name).join(', '));
+  ok(['knitting', 'dyeing', 'finishing'].every(k => r.j.find(x => x.id === k).perms.lotBoms), 'the knitting, dyeing and finishing roles can make lot BOMs');
   r = await call('POST', '/api/users', { username: 'knit1', name: 'Knit Sup', role: 'knitting', password: 'secret1', active: true }); ok(r.s === 201, 'create knitting user');
   r = await call('POST', '/api/users', { username: 'bad', role: 'nosuchrole', password: 'secret1' }); ok(r.s === 400, 'unknown role rejected');
   r = await call('POST', '/api/users', { username: ' spacey ', name: 'Spacey', role: 'knitting', password: 'secret1', active: true }); ok(r.s === 201 && r.j.username === 'spacey', 'username spaces trimmed on save');
@@ -429,6 +430,46 @@ const ok = (c, msg) => { if (!c) fails++; console.log((c ? 'PASS ' : 'FAIL ') + 
     ok(r.s === 201 && r.j.lotNo === 'SM/4471', 'dyeing keeps lot SM/4471 ' + (r.j.error || ''));
     r = await call('GET', '/api/report/stock?location=' + DA); ok(r.j.rows.some(x => x.lot === 'SM/4471' && x.category === 'Colored Fabric' && x.qty === 27), 'the dyed fabric is in stock as lot SM/4471');
     r = await call('GET', '/api/report/lots'); ok(r.j.rows.some(x => x.lot === 'SM/4471'), 'and the lot tracking report follows SM/4471'); }
+  // ---- opening stock typed on the item itself (moving from another software) ----
+  { const nx = (await call('GET', '/api/report/nextLot?date=' + TODAY)).j.lot;
+    r = await call('POST', '/api/items', { name: 'Old Yarn 40s', category: 'Yarn', unit: kg, rate: 150, openingQty: 120, openingRate: 180, openingLoc: 'STORE' });
+    const oy = r.j;
+    ok(r.s === 201 && oy.openingQty === 120 && oy.openingLot === nx && !oy.openingLotCustom, 'an item saved with 120 kg opening stock gets the next automatic lot number: ' + (oy.openingLot || r.j.error));
+    r = await call('GET', '/api/report/stock?location=STORE&item=' + oy.id); ok(r.j.rows.length === 1 && r.j.rows[0].lot === nx && r.j.rows[0].qty === 120 && r.j.rows[0].value === 21600, 'it is in stock in the Main Store: 120 kg worth 21,600 ' + JSON.stringify(r.j.rows[0]));
+    r = await call('GET', '/api/report/stockLedger?item=' + oy.id); { const x = r.j.rows.filter(y => y.doc !== 'Opening balance'); ok(x.length === 1 && x[0].doc === 'Opening stock' && x[0].qin === 120 && x[0].balQty === 120 && x[0]._link === '#/edit/items/' + oy.id, 'stock ledger: "Opening stock" 120 kg, opens the item ' + JSON.stringify(x[0])); }
+    r = await call('GET', '/api/report/stockMovement?category=Yarn&item=' + oy.id + '&from=' + TODAY); ok(r.j.rows[0].open === 120 && r.j.rows[0].recd === 0, 'yarn stock shows it as opening stock');
+    r = await call('GET', '/api/report/lots?lot=' + encodeURIComponent(nx)); ok(r.j.rows.some(x => x.lot === nx && x.supplier === 'Opening stock' && x.recdQty === 120), 'lot tracking follows the opening stock lot ' + nx);
+    r = await call('PUT', '/api/items/' + oy.id, Object.assign({}, oy, { rate: 160 })); ok(r.s === 200 && r.j.openingLot === nx && r.j.openingQty === 120, 'editing the item keeps its opening stock and lot');
+    // a typed lot number, fabric rolls, in a godown
+    r = await call('POST', '/api/items', { name: 'Old FG Jersey', category: 'Finished Goods', unit: kg, openingQty: 50, openingRate: 400, openingRolls: 10, openingLoc: g2.id, openingLot: ' old-fg 1 ' });
+    const of = r.j;
+    ok(r.s === 201 && of.openingLot === 'OLD-FG 1' && of.openingLotCustom === true && of.openingRolls === 10, 'a lot number typed for the opening stock is used (in capitals): ' + (of.openingLot || r.j.error));
+    r = await call('GET', '/api/report/stock?location=' + g2.id + '&item=' + of.id); ok(r.j.rows[0] && r.j.rows[0].qty === 50 && r.j.rows[0].rolls === 10, '50 kg in 10 rolls in Godown 2');
+    r = await call('POST', '/api/items', { name: 'Old FG 2', category: 'Finished Goods', unit: kg, openingQty: 5, openingLoc: g2.id, openingLot: 'old-fg 1' }); ok(r.s === 400 && /OLD-FG 1 is already used/.test(r.j.error), 'the same typed lot on another item is refused: ' + r.j.error);
+    r = await call('POST', '/api/items', { name: 'Old FG 2', category: 'Finished Goods', unit: kg, openingQty: 5, openingLoc: g2.id, openingLot: 'SM/4471' }); ok(r.s === 400 && /SM\/4471 is already used/.test(r.j.error), 'so is a lot a GRN gave');
+    { const a = (await call('GET', '/api/report/lotCheck?lot=old-fg%201')).j, b = (await call('GET', '/api/report/lotCheck?lot=OLD-FG%201&self=' + of.id)).j;
+      ok(!a.ok && a.usedIn === 'the opening stock of Old FG Jersey' && b.own, 'lot check: OLD-FG 1 is used in ' + a.usedIn + '; the item itself may keep it'); }
+    r = await call('POST', '/api/items', { name: 'Old FG 3', category: 'Finished Goods', unit: kg, openingQty: -5 }); ok(r.s === 400, 'opening stock below zero is refused: ' + r.j.error);
+    r = await call('POST', '/api/items', { name: 'Old FG 3', category: 'Finished Goods', unit: kg, openingQty: 5, openingLoc: 'NOPE' }); ok(r.s === 400, 'an unknown location is refused: ' + r.j.error);
+    // once some of it is sold, it cannot be cut below what went out, nor its lot renamed
+    r = await call('POST', '/api/deliveries', { date: TODAY, party: wbg.id, location: g2.id, lines: [{ item: of.id, lot: 'OLD-FG 1', qty: 20, rate: 500 }] }); ok(r.s === 201, '20 kg of the opening stock sent on a challan ' + (r.j.error || ''));
+    r = await call('PUT', '/api/items/' + of.id, Object.assign({}, of, { openingQty: 10 })); ok(r.s === 400 && /Not enough stock/.test(r.j.error), 'the opening stock cannot go below what was sent: ' + r.j.error);
+    r = await call('PUT', '/api/items/' + of.id, Object.assign({}, of, { openingLot: 'NEW 1' })); ok(r.s === 400 && /OLD-FG 1 is already used in Delivery Challan/.test(r.j.error), 'nor can its lot be renamed: ' + r.j.error);
+    r = await call('PUT', '/api/items/' + of.id, Object.assign({}, of, { openingQty: 60 })); ok(r.s === 200 && r.j.openingQty === 60 && r.j.openingLot === 'OLD-FG 1', 'it can be raised to 60 kg');
+    // dyes have no lot; an "as on" date counts from that day
+    r = await call('POST', '/api/items', { name: 'Old Dye', category: 'Dyes & Chemicals', unit: kg, openingQty: 8, openingRate: 900, openingLot: 'X1', openingDate: dayOff(-30) });
+    ok(r.s === 201 && !r.j.openingLot && r.j.openingLoc === 'STORE', 'dyes get no lot number, and are kept in the Main Store unless chosen');
+    { const od = r.j, before = (await call('GET', '/api/report/stock?item=' + od.id + '&asOn=' + dayOff(-31))).j.rows, after = (await call('GET', '/api/report/stock?item=' + od.id + '&asOn=' + dayOff(-30))).j.rows;
+      ok(!before.length && after.length === 1 && after[0].qty === 8, 'opening stock "as on" 30 days ago is not in the stock of the day before');
+      r = await call('PUT', '/api/items/' + od.id, Object.assign({}, od, { openingQty: '' })); ok(r.s === 200 && r.j.openingQty === undefined && r.j.openingLoc === undefined, 'clearing the qty removes the opening stock');
+      r = await call('GET', '/api/report/stock?item=' + od.id); ok(!r.j.rows.length, 'and it is no longer in stock'); }
+    // only logins that may enter opening stock can set it on an item
+    const role = (await call('POST', '/api/roles', { name: 'Masters only', perms: { masters: 'edit' } })).j;
+    await call('POST', '/api/users', { username: 'mast1', name: 'Mast', role: role.id, password: 'secret1', active: true });
+    const t0 = T; T = (await call('POST', '/api/login', { username: 'mast1', password: 'secret1' })).j.token;
+    r = await call('POST', '/api/items', { name: 'Masters Yarn', category: 'Yarn', unit: kg, openingQty: 99 }); ok(r.s === 201 && r.j.openingQty === undefined, 'a masters-only login saves the item without opening stock');
+    r = await call('PUT', '/api/items/' + oy.id, Object.assign({}, oy, { openingQty: 1 })); ok(r.s === 200 && r.j.openingQty === 120, '...and cannot change the opening stock of another');
+    T = t0; }
   r = await call('POST', '/api/transfers', { date: dayOff(-10), purpose: 'Yarn Issue', fromLoc: 'STORE', toLoc: KA, expectedQty: 48, jobRate: 9, expectedDate: dayOff(-2), lines: [{ item: yarn.id, lot: L2, qty: 50 }] }); ok(r.s === 201, 'yarn issued with an expected date two days ago');
   r = await call('GET', '/api/report/jobWork'); { const x = r.j.rows.find(y => y.lot === L2); ok(x && x.pending === 50 && x.status === 'Overdue 2 days' && r.j.cards[2].value >= 1, 'job work register: 50 kg still at the knitter, overdue 2 days: ' + JSON.stringify(x && [x.pending, x.status])); }
   r = await call('GET', '/api/report/dashboard'); ok(r.j.alerts.some(a => /job work send.*past the expected date/.test(a.text)), 'dashboard alert: job work late');
@@ -451,6 +492,127 @@ const ok = (c, msg) => { if (!c) fails++; console.log((c ? 'PASS ' : 'FAIL ') + 
   r = await call('GET', '/api/report/processStatus'); ok(r.j.rows.some(x => x.lot === L && x.agency === 'Dye Co' && /Material sent/.test(x.status)), 'processing status: grey lot at the dyeing agency is "material sent"');
   r = await call('POST', '/api/jobStatus', { date: TODAY, location: DA, lot: L, status: 'Colouring', remarks: 'in the machine' }); ok(r.s === 201, 'status update recorded');
   r = await call('GET', '/api/report/processStatus'); ok(r.j.rows.some(x => x.lot === L && x.agency === 'Dye Co' && /Colouring/.test(x.status)), 'processing status now shows colouring');
+
+  // ---- salesmen: sale bills & dispatch log, and collections by salesman and way of paying ----
+  { const s1 = (await call('POST', '/api/salesmen', { name: 'Rajesh Roy', area: 'Central Kolkata', phone: '98305 67890' })).j;
+    const s2 = (await call('POST', '/api/salesmen', { name: 'Amit Sharma', area: 'Burrabazar' })).j;
+    r = await call('POST', '/api/salesmen', { name: 'rajesh roy' }); ok(r.s === 400, 'a salesman name already used is refused: ' + r.j.error);
+    const fs1 = (await call('POST', '/api/items', { name: 'SM Jersey', category: 'Finished Goods', unit: kg, gst: 5, openingQty: 100, openingRate: 300, openingRolls: 10, openingLoc: 'FG', openingLot: 'SMT-1' })).j;
+    const c1 = (await call('POST', '/api/parties', { name: 'SM Cust 1', type: 'Customer', state: 'West Bengal', city: 'Howrah', salesman: s1.id })).j;
+    const c2 = (await call('POST', '/api/parties', { name: 'SM Cust 2', type: 'Customer', state: 'West Bengal', city: 'Siliguri' })).j;
+    const D = dayOff(-40), line = qty => [{ item: fs1.id, lot: 'SMT-1', qty, rate: 500, gst: 5 }];
+    const i1 = (await call('POST', '/api/invoices', { date: D, party: c1.id, location: 'FG', lines: line(40) })).j; // its salesman: the customer's
+    const i2 = (await call('POST', '/api/invoices', { date: D, party: c2.id, salesman: s2.id, location: 'FG', lines: line(30) })).j;
+    const i3 = (await call('POST', '/api/invoices', { date: D, party: c2.id, location: 'FG', lines: line(10) })).j; // no salesman at all
+    ok(i1.total === 21000 && i2.total === 15750 && i3.total === 5250 && i2.salesman === s2.id, 'three bills of the SM Jersey opening stock: 21,000 + 15,750 + 5,250');
+    r = await call('POST', '/api/receipts', { date: D, party: c1.id, amount: 10000, mode: 'Card (EDC / POS)', bank: 'CASH', card: 'Visa 4321', refNo: '845120', upi: 'x', invoiceId: i1.id });
+    ok(r.s === 201 && r.j.card === 'Visa 4321' && r.j.refNo === '845120' && r.j.upi === undefined, 'card machine payment keeps the card and the approval no (and nothing of other modes) ' + (r.j.error || ''));
+    await call('POST', '/api/receipts', { date: D, party: c1.id, amount: 5000, mode: 'Cash', bank: 'CASH' });
+    const chq = (await call('POST', '/api/receipts', { date: D, party: c2.id, salesman: s2.id, amount: 15750, mode: 'Cheque', refNo: '778899', invoiceId: i2.id })).j;
+    await call('POST', '/api/receipts', { date: D, party: c2.id, amount: 2000, mode: 'UPI', upi: 'cust2@upi' });
+    r = await call('GET', '/api/report/partyLedger?party=' + c1.id); ok(r.j.rows.some(x => /Card \(EDC \/ POS\): card Visa 4321, Appr 845120/.test(x.narration)), 'the party ledger shows the card payment with its details');
+    r = await call('GET', '/api/report/dispatchLog?from=' + D + '&to=' + D);
+    { const t = r.j.tables[0], [a, b, c] = t.rows;
+      ok(t.rows.length === 3 && t.chip === '3 invoices · 80 kg · 8 rolls', 'sale bills & dispatch log: ' + t.chip);
+      ok(a.salesman === 'Rajesh Roy' && a.city === 'Howrah' && a.lots[0].t === 'SM Jersey' && a.lots[0].sub === 'Lot SMT-1 · 40 kg · 4 rolls' && a.paid === 15000 && a.modes.join() === 'Card (EDC / POS),Cash,Part paid',
+        'a bill without a salesman shows its customer\'s; 40 kg in 4 rolls of lot SMT-1; 15,000 collected by card and cash: ' + JSON.stringify(a));
+      ok(b.salesman === 'Amit Sharma' && b.paid === 2000 && b.modes.join() === 'UPI,Cheque not cashed,Part paid', 'the cheque against a bill does not count until cashed: ' + b.modes.join(', '));
+      ok(c.salesman === '' && c.modes.join() === 'Unpaid', 'a bill with no salesman anywhere: unpaid'); }
+    r = await call('GET', '/api/report/dispatchLog?from=' + D + '&to=' + D + '&salesman=' + s1.id); ok(r.j.tables[0].rows.length === 1, 'filtered to one salesman');
+    r = await call('GET', '/api/report/dispatchLog?from=' + D + '&to=' + D + '&salesman=none'); ok(r.j.tables[0].rows.length === 1 && r.j.tables[0].rows[0].no === i3.no, 'or to bills without a salesman');
+    const col = async q => (await call('GET', '/api/report/collections?' + q)).j.tables[0];
+    { const t = await col('from=' + D + '&to=' + D), by = n => t.rows.find(x => x.name === n) || {};
+      const a = by('Rajesh Roy'), b = by('Amit Sharma'), n = by('No salesman');
+      ok(a.card === 10000 && a.cash === 5000 && a.total === 15000 && a.kg === 40 && a.rolls === 4 && a.due === 6000 && a.sub === 'Central Kolkata · 98305 67890',
+        'collections: Rajesh Roy took 10,000 by card and 5,000 cash, billed 40 kg in 4 rolls; his customers owe 6,000 ' + JSON.stringify(a));
+      ok(b.total === 0 && b.waiting === 15750 && b.kg === 30 && t.columns.some(c => c.k === 'waiting'), 'Amit Sharma: the cheque of 15,750 is shown as not cashed yet, not collected');
+      ok(n.upi === 2000 && n.kg === 10, 'money and bills with no salesman are shown on their own line');
+      ok(t.chip === '2 salesmen' && t.totalLabel === 'Total all salesmen', 'chip: ' + t.chip); }
+    await call('PUT', '/api/receipts/' + chq.id, Object.assign({}, chq, { clearedOn: dayOff(-38) }));
+    { const t = await col('from=' + dayOff(-38) + '&to=' + dayOff(-38)), b = t.rows.find(x => x.name === 'Amit Sharma');
+      ok(b.cheque === 15750 && b.total === 15750 && !b.waiting, 'once cashed, the cheque counts for Amit Sharma on the day it was cashed'); }
+    r = await call('GET', '/api/report/collections?salesman=' + s1.id); ok(r.j.tables[0].rows.length === 1 && r.j.tables[0].rows[0].name === 'Rajesh Roy', 'collections for one salesman'); }
+
+  // ---- lot BOM: the materials planned for one lot, applied to it, and what its entries really used ----
+  { const it = async (name, category, rate) => (await call('POST', '/api/items', { name, category, unit: kg, rate })).j;
+    const yb = await it('BOM Yarn', 'Yarn', 200), gb = await it('BOM Grey', 'Grey Fabric'), cb = await it('BOM Dyed', 'Colored Fabric'), fb = await it('BOM Jersey', 'Finished Goods');
+    const dye = await it('BOM Dye', 'Dyes & Chemicals', 500), salt = await it('BOM Salt', 'Dyes & Chemicals', 10), spare = await it('BOM Spare Dye', 'Dyes & Chemicals', 900);
+    const bag = await it('BOM Bag', 'Packing Material', 5), tape = await it('BOM Tape', 'Packing Material', 30);
+    // made before the yarn comes: the lot number is typed
+    const bomLines = [{ item: yb.id, qtyPerKg: 1.025 }, { item: dye.id, qtyPerKg: 0.02 }, { item: salt.id, qtyPerKg: '0.5' }, { item: bag.id, qtyPerKg: 0.05 }, { item: spare.id, qtyPerKg: 0.001 }, { item: '', qtyPerKg: 3 }];
+    r = await call('POST', '/api/lotBoms', { date: dayOff(-21), lot: ' 0987 ', lotKg: '205', outItem: fb.id, color: 'Navy', lines: bomLines });
+    const bom = r.j;
+    ok(r.s === 201 && bom.no === 'LB-0001' && bom.lot === '0987' && bom.lotKg === 205 && bom.lines.length === 5 && bom.lines[2].qtyPerKg === 0.5,
+      'a BOM for lot 0987 (typed, before the yarn comes): LB-0001, 5 materials per kg ' + (r.j.error || ''));
+    r = await call('POST', '/api/lotBoms', { date: dayOff(-21), lot: '0987', lines: [{ item: dye.id, qtyPerKg: 1 }] }); ok(r.s === 400 && /Lot 0987 already has a BOM \(LB-0001\)/.test(r.j.error), 'one BOM per lot: ' + r.j.error);
+    r = await call('POST', '/api/lotBoms', { date: dayOff(-21), lines: [{ item: dye.id, qtyPerKg: 1 }] }); ok(r.s === 400 && /Lot no is required/.test(r.j.error), 'a lot BOM needs its lot: ' + r.j.error);
+    r = await call('POST', '/api/lotBoms', { date: dayOff(-21), lot: 'X|1', lines: [{ item: dye.id, qtyPerKg: 1 }] }); ok(r.s === 400 && /letters, digits/.test(r.j.error), 'a lot number with odd characters is refused');
+    r = await call('POST', '/api/lotBoms', { date: dayOff(-21), lot: 'X1', lines: [{ item: gb.id, qtyPerKg: 1 }] }); ok(r.s === 400 && /yarn, dyes & chemicals, packing/.test(r.j.error), 'fabric is not a BOM material: ' + r.j.error);
+    r = await call('POST', '/api/lotBoms', { date: dayOff(-21), lot: 'X1', lines: [{ item: dye.id, qtyPerKg: 0 }] }); ok(r.s === 400 && /BOM Dye: the qty per kg/.test(r.j.error), 'each material needs its qty per kg: ' + r.j.error);
+    r = await call('POST', '/api/lotBoms', { date: dayOff(-21), lot: 'X1', lines: [{ item: dye.id, qtyPerKg: 1 }, { item: dye.id, qtyPerKg: 2 }] }); ok(r.s === 400 && /twice/.test(r.j.error), 'the same material twice is refused: ' + r.j.error);
+    r = await call('POST', '/api/lotBoms', { date: dayOff(-21), lot: 'X1', lines: [] }); ok(r.s === 400 && /at least one material/.test(r.j.error), 'a BOM without materials is refused');
+    r = await call('DELETE', '/api/items/' + spare.id); ok(r.s === 400 && /Lot BOM LB-0001/.test(r.j.error), 'a material in a lot BOM cannot be deleted: ' + r.j.error);
+    r = await call('GET', '/api/report/bomVsActual?lot=0987'); ok(r.j.tables[0].rows.length === 5 && r.j.tables[0].rows.every(x => x.status === 'Not started'), 'before any work every line is "Not started"');
+    // the lot goes through knitting, dyeing and finishing
+    const D = dayOff(-20);
+    r = await call('POST', '/api/grn', { date: D, party: sup.id, location: 'STORE', lines: [{ item: yb.id, lot: '0987', qty: 205, rate: 200 }, { item: dye.id, qty: 10, rate: 500 }, { item: salt.id, qty: 200, rate: 10 }, { item: bag.id, qty: 50, rate: 5 }, { item: tape.id, qty: 5, rate: 30 }] });
+    ok(r.s === 201 && r.j.lines[0].lot === '0987', 'the yarn arrives as lot 0987 ' + (r.j.error || ''));
+    await call('POST', '/api/transfers', { date: D, purpose: 'Yarn Issue', fromLoc: 'STORE', toLoc: 'KNIT', lines: [{ item: yb.id, lot: '0987', qty: 205 }] });
+    r = await call('POST', '/api/knitting', { date: D, location: 'KNIT', outLoc: 'DYE', lines: [{ item: yb.id, lot: '0987', qty: 205 }], outItem: gb.id, outQty: 200, rolls: 8, wastageQty: 5 }); ok(r.s === 201 && r.j.lotNo === '0987', 'knitted: 205 kg yarn into 200 kg grey ' + (r.j.error || ''));
+    r = await call('POST', '/api/dyeing', { date: D, location: 'DYE', outLoc: 'DYE', lotNo: '0987', inItem: gb.id, inQty: 200, chemLoc: 'STORE', color: 'Navy', outItem: cb.id, outQty: 190, wastageQty: 10,
+      lines: [{ item: dye.id, qty: 4.4 }, { item: salt.id, qty: 100 }] }); ok(r.s === 201, 'dyed: 4.4 kg dye and 100 kg salt for the 200 kg ' + (r.j.error || ''));
+    r = await call('POST', '/api/finishing', { date: D, location: 'DYE', lotNo: '0987', inItem: cb.id, inQty: 190, packLoc: 'STORE', outItem: fb.id, outQty: 185, rolls: 8, wastageQty: 5, outLoc: 'FG',
+      lines: [{ item: bag.id, qty: 9 }, { item: tape.id, qty: 1 }] }); ok(r.s === 201, 'finished: 9 bags and a tape for the 190 kg ' + (r.j.error || ''));
+    r = await call('GET', '/api/report/bomVsActual?lot=0987');
+    { const t = r.j.tables[0], by = n => t.rows.find(x => x.item === n) || {};
+      const y = by('BOM Yarn'), d = by('BOM Dye'), sl = by('BOM Salt'), b = by('BOM Bag'), tp = by('BOM Tape'), sp = by('BOM Spare Dye');
+      ok(y.stage === 'Knitting' && y.stageSub === '200 kg knitted' && y.want === 205 && y.got === 205 && y.status === 'As per BOM' && y.cost === 41000, 'yarn: 1.025 per kg × 200 kg grey = 205 kg, all used: as per BOM ' + JSON.stringify(y));
+      ok(d.stage === 'Dyeing' && d.want === 4 && d.got === 4.4 && d.diff === 0.4 && d.pct === 10 && d.status === 'Over BOM' && d.cost === 2200, 'dye: 0.02 × 200 = 4 kg planned, 4.4 used: over the BOM by 10% ' + JSON.stringify([d.want, d.got, d.pct, d.status]));
+      ok(sl.want === 100 && sl.got === 100 && sl.status === 'As per BOM', 'salt as per BOM');
+      ok(b.stage === 'Finishing' && b.stageSub === '190 kg finished' && b.want === 9.5 && b.got === 9 && b.pct === -5.26 && b.status === 'Under BOM', 'bags: 0.05 × 190 = 9.5 planned, 9 used: under ' + JSON.stringify([b.want, b.got, b.pct]));
+      ok(tp.status === 'Not in BOM' && tp.perKg === '' && tp.got === 1, 'tape was used but is not in the BOM');
+      ok(sp.status === 'Not used' && sp.want === 0.2 && sp.got === 0, 'the spare dye was planned but not used');
+      ok(t.rows[0].lot === '0987' && t.rows[0].lotSub === 'BOM Jersey · Navy' && t.rows[0]._link === '#/edit/lotBoms/' + bom.id && t.chip === '1 lot · 6 materials', 'the lot, its fabric and color; each line opens the BOM: ' + t.chip);
+      ok(r.j.cards[1].value === 1 && r.j.cards[2].value === 2, 'cards: 1 material over the BOM, 2 under or not used'); }
+    r = await call('GET', '/api/report/bomVsActual?lot=0987&stage=Dyeing'); ok(r.j.tables[0].rows.length === 3 && r.j.tables[0].rows.every(x => x.stage === 'Dyeing'), 'one stage at a time');
+    // dyeing and finishing logins read the lot BOMs (their entries fill from them) but only some may change them
+    const role = (await call('POST', '/api/roles', { name: 'Dye house only', perms: { dyeing: 'full', rep_production: 'view' } })).j;
+    await call('POST', '/api/users', { username: 'dye2', name: 'Dye Two', role: role.id, password: 'secret1', active: true });
+    const t0 = T; T = (await call('POST', '/api/login', { username: 'dye2', password: 'secret1' })).j.token;
+    r = await call('GET', '/api/lotBoms'); ok(r.s === 200 && r.j.some(x => x.lot === '0987'), 'a dyeing login reads the lot BOMs');
+    r = await call('POST', '/api/lotBoms', { date: D, lot: 'X2', lines: [{ item: dye.id, qtyPerKg: 1 }] }); ok(r.s === 403, '...but cannot make one without "Lot BOM" in its role');
+    r = await call('GET', '/api/report/bomVsActual?lot=0987'); ok(r.s === 200 && !r.j.tables[0].rows[0]._link, 'it sees Lot BOM vs Actual, without links to BOMs it may not open');
+    T = t0;
+    r = await call('PUT', '/api/lotBoms/' + bom.id, Object.assign({}, bom, { lines: bom.lines.filter(l => l.item !== spare.id) })); ok(r.s === 200 && r.j.lines.length === 4, 'the BOM can be changed');
+    r = await call('DELETE', '/api/items/' + spare.id); ok(r.s === 200, 'and then the spare dye can be deleted'); }
+
+  // ---- knitting delivered in parts: 1,000 kg of yarn given; 300 kg of grey back, then 400 kg, then the rest ----
+  { const ky = (await call('POST', '/api/items', { name: 'KD Yarn', category: 'Yarn', unit: kg, rate: 250 })).j;
+    const kgr = (await call('POST', '/api/items', { name: 'KD Grey', category: 'Grey Fabric', unit: kg })).j;
+    const D = dayOff(-15), dmy = x => x.split('-').reverse().join('-');
+    await call('POST', '/api/grn', { date: D, party: sup.id, location: 'STORE', lines: [{ item: ky.id, lot: 'KD-1', qty: 1000, rate: 250 }] });
+    r = await call('POST', '/api/transfers', { date: D, purpose: 'Yarn Issue', fromLoc: 'STORE', toLoc: KA, expectedQty: 975, lines: [{ item: ky.id, lot: 'KD-1', qty: 1000 }] }); ok(r.s === 201, '1,000 kg of yarn lot KD-1 given to Knit Co, 975 kg of grey expected');
+    r = await call('GET', '/api/report/knitLot?location=' + KA + '&lot=KD-1'); ok(r.j.given === 1000 && r.j.deliveries === 0 && r.j.expectedPct === 2.5, 'a knitting entry learns: 1,000 kg given, no delivery yet, 2.5% loss expected ' + JSON.stringify(r.j));
+    r = await call('GET', '/api/report/knitDeliveries?lot=KD-1'); { const x = r.j.tables[0].rows[0]; ok(x && x.status === 'Not started' && x.given === 1000 && x.left === 1000, 'Knitting Deliveries: given, not started'); }
+    const knit = (date, grey, yarn, waste, extra) => call('POST', '/api/knitting', Object.assign({ date, location: KA, outLoc: KA, lines: [{ item: ky.id, lot: 'KD-1', qty: yarn }], outItem: kgr.id, outQty: grey, wastageQty: waste }, extra || {}));
+    const k1 = (await knit(dayOff(-12), 300, 307.692, 7.692)).j;                         // 2.5%: 300 / 0.975
+    const k2 = (await knit(dayOff(-8), 400, 412.371, 12.371, { lastDelivery: false })).j; // 3% typed: 400 / 0.97
+    ok(k1.lotNo === 'KD-1' && k2.lotNo === 'KD-1' && k2.lastDelivery === undefined, 'two part deliveries, both lot KD-1 ' + (k1.error || k2.error || ''));
+    r = await call('GET', '/api/report/knitLot?location=' + KA + '&lot=KD-1&self=' + k2.id); ok(r.j.deliveries === 1 && r.j.grey === 300 && r.j.waste === 7.692, 'the entry being edited is not counted among the deliveries before it');
+    r = await call('GET', '/api/report/knitDeliveries?lot=KD-1');
+    { const x = r.j.tables[0].rows[0] || {};
+      ok(x.given === 1000 && x.grey === 700 && x.yarn === 720.063 && x.waste === 20.063 && x.pct === 2.79 && x.left === 279.937 && x.status === 'Part received', '700 kg of grey received so far, wastage 20.063 kg = 2.79%, 279.937 kg of yarn still there: ' + JSON.stringify([x.grey, x.waste, x.pct, x.left, x.status]));
+      ok(x.deliveries.length === 2 && x.deliveries[0].t === dmy(dayOff(-12)) + ' · ' + k1.no + ': 300 kg grey' && x.deliveries[0].sub === 'from 307.692 kg yarn · wastage 7.692 kg = 2.50%' && x.deliveries[1].sub === 'from 412.371 kg yarn · wastage 12.371 kg = 3.00%',
+        'each delivery with its wastage in kg and %: ' + x.deliveries.map(d => d.t + ' (' + d.sub + ')').join('; ')); }
+    r = await knit(dayOff(-3), 270, 279.937, 9.937, { lastDelivery: true }); ok(r.s === 201 && r.j.lastDelivery === true, 'the last delivery: 270 kg of grey uses up the 279.937 kg left');
+    r = await call('GET', '/api/report/knitDeliveries?lot=KD-1'); ok(!r.j.tables[0].rows.length, 'a lot fully delivered drops off the open list');
+    r = await call('GET', '/api/report/knitDeliveries?lot=KD-1&all=1');
+    { const t = r.j.tables[0], x = t.rows[0] || {};
+      ok(x.status === 'Completed' && x.grey === 970 && x.yarn === 1000 && x.waste === 30 && x.pct === 3 && x.left === 0 && x.deliveries.length === 3 && / \(last\)$/.test(x.deliveries[2].t) && x.deliveries[2].sub === 'from 279.937 kg yarn · wastage 9.937 kg = 3.55%',
+        '"Include completed": 1,000 kg of yarn gave 970 kg of grey in 3 deliveries, wastage 30 kg = 3.00% ' + JSON.stringify([x.grey, x.waste, x.pct, x.status]));
+      ok(t.totals.pct === '3.00%' && r.j.cards[2].value === 30 && r.j.cards[2].sub === '3.00% of the yarn used', 'the total line and the wastage card show 30 kg and 3.00%'); }
+    r = await call('GET', '/api/report/knitDeliveries?all=1&location=' + DA); ok(!r.j.tables[0].rows.some(x => x.lot === 'KD-1'), 'filtered by agency');
+    r = await call('GET', '/api/report/wastage?stage=Knitting'); ok(r.j.tables[1].rows.filter(x => x.lot === 'KD-1').map(x => x.pct).join() === '2.5,3,3.55', 'the Wastage Report has the three deliveries in kg and %'); }
 
   // ---- GST returns ----
   r = await call('GET', '/api/report/gstr1?from=' + TODAY + '&to=' + TODAY); { const b = r.j.tables[0].rows.find(x => x.no === wbInv.no) || {}; ok(b.gstin === '19AAACW1234A1Z5' && b.taxable === 100000 && b.cgst === 2500 && b.sgst === 2500, 'GSTR-1 B2B: the WB Garments invoice, taxable ₹1,00,000, CGST + SGST ₹2,500 each'); }

@@ -35,16 +35,19 @@
     'Office Expenses', 'Telephone / Internet', 'Miscellaneous'];
   const COST_CATEGORIES = ['Electricity', 'Rent', 'Repairs & Maintenance', 'Machine Running Cost', 'Factory Overheads', 'Utilities (Power/Water)', 'Maintenance', 'Other'];
   const OVERHEAD_CATEGORIES = EXPENSE_CATEGORIES.concat(['Utilities (Power/Water)', 'Maintenance', 'Other']);
-  const PAY_MODES = ['Cash', 'Bank Transfer', 'UPI', 'Cheque', 'Online Payment'];
+  // A card swiped on the card machine (EDC / POS) is settled into a bank account, like UPI.
+  const CARD_MODE = 'Card (EDC / POS)';
+  const PAY_MODES = ['Cash', 'Bank Transfer', 'UPI', 'Cheque', CARD_MODE, 'Online Payment'];
   // What is noted down for each way of paying: a cheque's no., date and bank; the UPI phone or ID; the UTR ...
   const PAY_DETAILS = {
     Cash: ['person', 'refNo'],
     'Bank Transfer': ['transferType', 'refNo', 'payBank', 'accountNo'],
     UPI: ['upi', 'refNo'],
     Cheque: ['refNo', 'chequeDate', 'payBank'],
+    [CARD_MODE]: ['card', 'refNo'],
     'Online Payment': ['payVia', 'refNo'],
   };
-  const PAY_DETAIL_KEYS = ['person', 'transferType', 'refNo', 'chequeDate', 'payBank', 'accountNo', 'upi', 'payVia'];
+  const PAY_DETAIL_KEYS = ['person', 'transferType', 'refNo', 'chequeDate', 'payBank', 'accountNo', 'upi', 'card', 'payVia'];
   const TRANSFER_TYPES = ['NEFT', 'RTGS', 'IMPS'];
   // The details in one line for lists, ledgers and the bank book, e.g. "004512 dt 05-11-2026, Axis Bank, Burrabazar" for a cheque.
   // A bare number gets its name in front (UTR, Txn). A receipt in parts lists each part.
@@ -60,6 +63,7 @@
       Cheque: [[v('refNo'), v('chequeDate') && 'dt ' + v('chequeDate').split('-').reverse().join('-')].filter(Boolean).join(' '), v('payBank')],
       'Bank Transfer': [[v('transferType'), tag('UTR', v('refNo'))].filter(Boolean).join(' '), v('payBank'), v('accountNo') && 'A/c ' + v('accountNo')],
       UPI: [v('upi'), tag('Txn', v('refNo'))],
+      [CARD_MODE]: [v('card') && 'card ' + v('card'), tag('Appr', v('refNo'))],
       'Online Payment': [v('payVia'), tag('Txn', v('refNo'))],
     }[p.mode] || [v('refNo')];
     return bits.filter(Boolean).join(', ');
@@ -74,6 +78,9 @@
   const STAGES = ['Knitting', 'Dyeing', 'Finishing'];
   // Names used for the stages on the labour screens.
   const STAGE_LABELS = { Knitting: 'Knitting', Dyeing: 'Color (Dyeing)', Finishing: 'Finishing & Packing' };
+  // The stage that uses a material of a lot BOM, by its category: yarn is knitted, dyes & chemicals go into
+  // dyeing, packing and other material into finishing (the materials those entries take).
+  const BOM_STAGE = { 'Yarn': 'Knitting', 'Dyes & Chemicals': 'Dyeing', 'Packing Material': 'Finishing', 'Others': 'Finishing' };
 
   /* ---------------- job-work agencies ---------------- */
   // An agency is a party that does knitting, dyeing or finishing for us. Its party record ticks the
@@ -237,8 +244,9 @@
   const LEVELS = ['none', 'view', 'edit', 'full'];
   const PERM_AREAS = [
     { k: 'dashboard', label: 'MIS dashboard (sales, dues, stock value)', group: 'General', viewOnly: true },
-    { k: 'masters', label: 'Masters: items, parties, machines, processes, recipes', group: 'General' },
+    { k: 'masters', label: 'Masters: items, parties, salesmen, machines, processes, recipes', group: 'General' },
     { k: 'approvals', label: 'Approve changes & deletions made by other staff', group: 'General', viewOnly: true },
+    { k: 'support', label: "Remote support: view and control another user's ERP screen (with their consent)", group: 'General', viewOnly: true },
     { k: 'leads', label: 'Sales leads & follow-ups', group: 'CRM' },
     { k: 'purchaseOrders', label: 'Purchase orders', group: 'Purchase' },
     { k: 'grn', label: 'Goods receipt (GRN)', group: 'Purchase' },
@@ -250,6 +258,7 @@
     { k: 'dyeing', label: 'Dyeing / coloring', group: 'Production' },
     { k: 'finishing', label: 'Finishing & packing', group: 'Production' },
     { k: 'jobStatus', label: 'Processing status updates', group: 'Production' },
+    { k: 'lotBoms', label: 'Lot BOM (materials for each lot)', group: 'Production' },
     { k: 'priceList', label: 'Party price list', group: 'Sales' },
     { k: 'quotations', label: 'Quotations', group: 'Sales' },
     { k: 'salesOrders', label: 'Sales orders', group: 'Sales' },
@@ -272,7 +281,7 @@
     { k: 'rep_accounts', label: 'Outstanding, ledger, labour payable & GST summary', group: 'Reports', viewOnly: true },
     { k: 'rep_gst', label: 'GST registers, GSTR-1 & GSTR-3B data', group: 'Reports', viewOnly: true },
   ];
-  const MASTER_COLS = ['units', 'items', 'parties', 'locations', 'machines', 'processes', 'boms'];
+  const MASTER_COLS = ['units', 'items', 'parties', 'locations', 'machines', 'processes', 'boms', 'salesmen'];
   const ADMIN_COLS = ['users', 'roles'];
   // Collections whose permission area is not their own name.
   const COL_AREA = { banks: 'banking', bankEntries: 'banking', emiPayments: 'loans', employees: 'staff', attendance: 'staff' };
@@ -293,18 +302,18 @@
     outstanding: 'rep_accounts', partyLedger: 'rep_accounts', gst: 'rep_accounts', labourPayable: 'rep_accounts',
     labourBalance: 'labourPayments', // "still payable" figure shown on the labour payment form
     stockMovement: 'rep_inventory', godownStock: 'rep_inventory',
-    jobWork: 'rep_production', processStatus: 'rep_production',
-    customer: 'rep_sales', followUps: 'leads',
+    jobWork: 'rep_production', processStatus: 'rep_production', bomVsActual: 'rep_production', knitDeliveries: 'rep_production',
+    customer: 'rep_sales', followUps: 'leads', dispatchLog: 'rep_sales', collections: 'rep_accounts',
     bankBook: 'banking', bankReco: 'banking', cheques: 'banking', expenses: 'overheads', loans: 'loans', powerBills: 'powerBills',
     salaryRegister: 'salary', salaryDue: 'salary', attendanceReport: 'staff',
     salesRegister: 'rep_gst', purchaseRegister: 'rep_gst', gstr1: 'rep_gst', gstr3b: 'rep_gst', partyGst: 'rep_gst',
     activity: 'admin',
     // billStatus (paid / due on each bill) is shown on the invoice and purchase bill lists: open to their users
-    // stockChoices, nextLot, partyBalance are helpers used inside forms: open to every signed-in user
+    // stockChoices, nextLot, partyBalance, knitLot are helpers used inside forms: open to every signed-in user
   };
   const levelAtLeast = (have, need) => LEVELS.indexOf(have || 'none') >= LEVELS.indexOf(need);
 
-  const Shared = { r2, r3, num, CATEGORIES, RAW_CATEGORIES, LOT_CATEGORIES, LOT_PATTERN, lotPattern, lotPrefix, lotFmt, mainLot, PARTY_TYPES, EXPENSE_CATEGORIES, COST_CATEGORIES, OVERHEAD_CATEGORIES, PAY_MODES, PAY_DETAILS, PAY_DETAIL_KEYS, TRANSFER_TYPES, payDetail, DEPARTMENTS, ATTENDANCE, JOB_STATUSES, isGodown, STAGES, STAGE_LABELS, AGENCY_WORK, workOf, isAgency, doesWork, TAX_COLS, PRICED_COLS, applyTotals, isInterState, parseRolls, fmtRolls, allocRolls, supplyHint, STATES, STATE_NAMES, stateCode, checkGstin, partyIs, LEVELS, PERM_AREAS, MASTER_COLS, ADMIN_COLS, COL_AREA, areaOf, REPORT_AREA, levelAtLeast };
+  const Shared = { r2, r3, num, CATEGORIES, RAW_CATEGORIES, LOT_CATEGORIES, LOT_PATTERN, lotPattern, lotPrefix, lotFmt, mainLot, PARTY_TYPES, EXPENSE_CATEGORIES, COST_CATEGORIES, OVERHEAD_CATEGORIES, PAY_MODES, CARD_MODE, PAY_DETAILS, PAY_DETAIL_KEYS, TRANSFER_TYPES, payDetail, DEPARTMENTS, ATTENDANCE, JOB_STATUSES, isGodown, STAGES, STAGE_LABELS, BOM_STAGE, AGENCY_WORK, workOf, isAgency, doesWork, TAX_COLS, PRICED_COLS, applyTotals, isInterState, parseRolls, fmtRolls, allocRolls, supplyHint, STATES, STATE_NAMES, stateCode, checkGstin, partyIs, LEVELS, PERM_AREAS, MASTER_COLS, ADMIN_COLS, COL_AREA, areaOf, REPORT_AREA, levelAtLeast };
   if (typeof module !== 'undefined' && module.exports) module.exports = Shared;
   else root.Shared = Shared;
 })(this);

@@ -37,6 +37,7 @@ const crypto = require('crypto');
 const db = require('./server/db');
 const engine = require('./server/engine');
 const seed = require('./server/seed');
+const wsRelay = require('./server/ws');
 const { hashPassword, verifyPassword } = require('./server/auth');
 const Shared = require('./public/js/shared');
 const { PERM_AREAS, MASTER_COLS, areaOf, REPORT_AREA, levelAtLeast } = Shared;
@@ -54,13 +55,14 @@ const MIME = {
 };
 
 // Collections exposed over the API. `prefix` => documents get an auto number. `admin` => admin only.
+// `open` => every login may read it (lot BOMs fill the materials of dyeing and finishing entries).
 const COLS = {
-  units: {}, items: {}, parties: {}, locations: {}, machines: {}, processes: {}, boms: {}, priceList: {},
+  units: {}, items: {}, parties: {}, locations: {}, machines: {}, processes: {}, boms: {}, priceList: {}, salesmen: {},
   purchaseOrders: { prefix: 'PO' }, grn: { prefix: 'GRN' }, purchaseBills: { prefix: 'PB' }, payments: { prefix: 'PAY' },
   transfers: { prefix: 'TRF' }, stockAdjust: { prefix: 'ADJ' },
   knitting: { prefix: 'KNT' }, dyeing: { prefix: 'DYE' }, finishing: { prefix: 'FIN' }, overheads: { prefix: 'EXP' }, labourPayments: { prefix: 'LP' },
   salesOrders: { prefix: 'SO' }, deliveries: { prefix: 'DC' }, invoices: { prefix: 'INV' }, receipts: { prefix: 'RCT' },
-  leads: { prefix: 'LD' }, quotations: { prefix: 'QT' }, jobStatus: { prefix: 'PS' },
+  leads: { prefix: 'LD' }, quotations: { prefix: 'QT' }, jobStatus: { prefix: 'PS' }, lotBoms: { prefix: 'LB', open: true },
   banks: {}, bankEntries: { prefix: 'BNK' }, loans: {}, emiPayments: { prefix: 'EMI' }, powerBills: { prefix: 'EB' },
   employees: {}, attendance: { prefix: 'ATT' }, salary: { prefix: 'SAL' },
   users: { admin: true }, roles: { admin: true },
@@ -102,6 +104,14 @@ function currentUser(req) {
   const u = db.data.users.find(x => x.id === s.userId && x.active !== false);
   return u ? Object.assign({ token }, u) : null;
 }
+// The signed-in user for a bare token. The WebSocket relay has no request object, so it looks users up this way.
+function userByToken(token) {
+  if (!token) return null;
+  let s = sessions.get(token) || db.sessions.get(token);
+  if (!s || s.exp < Date.now()) return null;
+  const u = db.data.users.find(x => x.id === s.userId && x.active !== false);
+  return u ? Object.assign({ token }, u) : null;
+}
 setInterval(() => {
   const now = Date.now();
   for (const [t, s] of sessions) if (s.exp < now) sessions.delete(t);
@@ -119,6 +129,8 @@ function permsOf(user) {
 const roleName = user => user.role === 'admin' ? 'Administrator' : ((db.data.roles.find(r => r.id === user.role) || {}).name || 'No role');
 const can = (user, area, level) => user.role === 'admin' || (area !== 'admin' && levelAtLeast(permsOf(user)[area], level));
 const approver = user => user.role === 'admin' || can(user, 'approvals', 'view');
+// May this login act as the agent in a remote support session (view and control another user's screen)?
+const canSupport = user => user.role === 'admin' || can(user, 'support', 'view');
 
 // Records some logins may read only in part: account names (for choosing where money went) without
 // balances, and staff names without salaries. Returns null when the record is hidden altogether.
@@ -234,7 +246,7 @@ function referencedBy(id, skip) {
 
 // Reject a change that would make any stock go negative (unless settings allow it).
 function checkStock(col, trialData) {
-  if (!engine.STOCK_COLS.includes(col) || db.data.settings.allowNegativeStock) return;
+  if (!(engine.STOCK_COLS.includes(col) || col === 'items') || db.data.settings.allowNegativeStock) return; // items: their opening stock
   const before = new Set(engine.computed(db.data, db.version).errors.map(e => e.key));
   const fresh = engine.compute(trialData).errors.filter(e => !before.has(e.key));
   if (fresh.length) {
@@ -268,6 +280,8 @@ function saveRecord(col, body, user, existing) {
   if (col === 'locations' && existing && existing.party) Object.assign(doc, { party: existing.party, type: 'Job Worker' }); // stays the agency's
   // Staff who may not see salaries cannot change them either (the form they saw had none).
   if (col === 'employees' && !can(user, 'salary', 'view')) for (const k of ['salary', 'basis', 'bankAccount']) { if (existing && existing[k] !== undefined) doc[k] = existing[k]; else delete doc[k]; }
+  // ...and the opening stock on an item is stock: only those who may enter opening stock can change it.
+  if (col === 'items' && !can(user, 'stockAdjust', 'edit')) for (const k of engine.OPENING_KEYS) { if (existing && existing[k] !== undefined) doc[k] = existing[k]; else delete doc[k]; }
 
   if (col === 'users') {
     const pw = doc.password; delete doc.password;
@@ -498,7 +512,7 @@ async function api(req, res, url) {
   const isMaster = MASTER_COLS.includes(col);
   // Admin-only collections; masters are readable by everyone (needed to fill dropdowns).
   if (COLS[col].admin && user.role !== 'admin' && !(col === 'roles' && method === 'GET')) throw denied();
-  const mayView = r => isMaster || COLS[col].admin || can(user, areaOf(col, r), 'view');
+  const mayView = r => isMaster || COLS[col].admin || COLS[col].open || can(user, areaOf(col, r), 'view');
   const mayWrite = (r, level) => can(user, areaOf(col, r), level);
 
   if (method === 'GET') {
@@ -547,6 +561,15 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, { error: 'Method not allowed' });
   serveStatic(req, res, url.pathname);
+});
+
+// Remote support: a WebSocket relay carrying only the screen-share set-up and the agent's consented actions.
+wsRelay.attach(server, {
+  userByToken, canSupport,
+  onEvent: (kind, user, info) => {
+    if (kind === 'start') logAct(user, 'started remote support', 'support', null, 'session code ' + info.code);
+    else if (kind === 'join') logAct(user, 'joined remote support', 'support', null, 'helping ' + info.host);
+  },
 });
 
 // Daily automatic backup while the server runs (AUTO_BACKUP=0 turns it off). Checked shortly after

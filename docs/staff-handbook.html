@@ -132,6 +132,7 @@ table { margin: 3px 0 8px; }
       <li>GST reports, approvals and the activity log</li>
       <li>Quick fixes for common messages</li>
       <li>Who does what</li>
+      <li>Remote support</li>
     </ol>
   </div>
   <div class="foot"><span>For all staff using the ERP</span><span>Boxes marked * must be filled in</span></div>
@@ -209,6 +210,16 @@ table { margin: 3px 0 8px; }
       <tr><td>Re-order level</td><td>Optional. Shows a <b>Low</b> alert when stock falls below this</td><td class="ex">500</td></tr>
       <tr><td>Description</td><td>Quality details, if any</td><td class="ex">100% cotton, combed</td></tr>
     </table>
+    <p style="break-after: avoid; page-break-after: avoid"><b>Opening stock</b> (bottom of the same form): the stock of this item you already have when you start, for example from your old software. Leave it blank if there is none.</p>
+    <table>
+      <tr><th style="width:24%">Box</th><th>What to write</th><th style="width:26%">Example</th></tr>
+      <tr><td>Opening stock qty</td><td>How much you have now</td><td class="ex">850</td></tr>
+      <tr><td>Rate (₹ per unit)</td><td>What it cost (fills in from the standard rate). Gives the stock its value</td><td class="ex">240</td></tr>
+      <tr><td>Kept at</td><td>Where it is: Main Store, a godown, or the agency that has it</td><td class="ex">Main Store</td></tr>
+      <tr><td>Lot no</td><td>Yarn and fabric only. Leave it for the next automatic number, or type the old lot number: a pop-up explains it first</td><td class="ex">OLD/40</td></tr>
+      <tr><td>Rolls</td><td>Fabric only: how many rolls</td><td class="ex">40</td></tr>
+      <tr><td>Stock as on</td><td>The day you counted it. Blank = before every entry</td><td class="ex">01-04-2026</td></tr>
+    </table>
   </div>
 
   <div class="sec">
@@ -224,7 +235,7 @@ table { margin: 3px 0 8px; }
       <tr><td><b>Finished Goods</b></td><td>Packed fabric you sell</td><td>Finishing output, sales order, challan, invoice</td></tr>
     </table>
     <div class="tip"><b>Create the whole chain for every product you make.</b> For example: Cotton Yarn 30s (<b>Yarn</b>) → Grey Single Jersey 30s (<b>Grey Fabric</b>) → Dyed Single Jersey 30s (<b>Colored Fabric</b>) → Finished Single Jersey 30s (<b>Finished Goods</b>).</div>
-    <div class="note"><b>Creating an item does not add stock.</b> Stock comes in through <b>Purchase → Goods Receipt (GRN)</b> when you buy, or <b>Inventory → Opening / Adjustment</b> for stock you already have.</div>
+    <div class="note"><b>Creating an item adds stock only through its Opening stock boxes.</b> After that, stock comes in through <b>Purchase → Goods Receipt (GRN)</b> when you buy. Stock of one item in several lots or places goes in <b>Inventory → Opening / Adjustment</b>.</div>
   </div>
 
   <div class="sec">
@@ -235,6 +246,7 @@ table { margin: 3px 0 8px; }
       <tr><th style="width:24%">Box</th><th>What to write</th><th style="width:28%">Example</th></tr>
       <tr><td>Party name *</td><td>Business name</td><td class="ex">Kolkata Garments Pvt Ltd</td></tr>
       <tr><td>Type *</td><td><b>Supplier</b> (you buy from them) · <b>Customer</b> (you sell to them) · <b>Job Worker</b> (an agency that knits, dyes or finishes for you) · <b>Both</b></td><td class="ex">Customer</td></tr>
+      <tr><td>Salesman</td><td>Customers: the salesman who looks after them (Masters → Salesmen: name, area, phone). Fills in on their invoices and receipts</td><td class="ex">Rajesh Roy</td></tr>
       <tr><td>Contact person</td><td>Who you talk to</td><td class="ex">Mr. Sen</td></tr>
       <tr><td>Phone / Email</td><td>Contact details</td><td class="ex">+91 98300 12345</td></tr>
       <tr><td>State *</td><td>Pick from the list. <b>Decides the GST type</b></td><td class="ex">West Bengal</td></tr>
@@ -306,6 +318,7 @@ table { margin: 3px 0 8px; }
       <tr><td>Silicone Softener</td><td>0.02</td><td>11.7 kg</td></tr>
     </table>
     <div class="note"><b>Only these appear in recipes:</b> Dyes &amp; Chemicals, Packing Material and Others. Yarn is entered directly in each knitting entry.</div>
+    <div class="tip"><b>One lot's own materials:</b> <b>Production → Lot BOM</b> keeps a BOM for each lot number (Part 2, before step 6). A recipe can be copied into it.</div>
   </div>
 
   <div class="sec">
@@ -355,7 +368,8 @@ table { margin: 3px 0 8px; }
       <tr><td>2</td><td>Goods Receipt (GRN)</td><td>Store</td><td>Yarn arrives at the <b>Main Store</b> and gets its <b>lot number</b> (L-0001)</td></tr>
       <tr><td>3</td><td>Purchase Bill</td><td>Purchase / Accounts</td><td>Supplier's bill recorded (money only)</td></tr>
       <tr><td>4</td><td>Yarn Issue to Knitting</td><td>Store</td><td>Yarn sent to the <b>knitting agency</b> with a job work challan</td></tr>
-      <tr><td>5</td><td>Knitting</td><td>Knitting</td><td>The agency's <b>grey fabric</b> is recorded with the <b>same lot number</b>, and goes <b>straight to the dyeing agency</b></td></tr>
+      <tr><td>5</td><td>Knitting</td><td>Knitting</td><td>The agency's <b>grey fabric</b> is recorded with the <b>same lot number</b> (all at once or one entry per part delivery), and goes <b>straight to the dyeing agency</b></td></tr>
+      <tr><td>+</td><td>Lot BOM <i>(optional)</i></td><td>Dyeing</td><td>The dyes, chemicals and packing planned <b>for this lot</b>; the next steps fill them in from it</td></tr>
       <tr><td>6</td><td>Dyeing</td><td>Dyeing</td><td>The dyeing agency turns grey into <b>coloured fabric</b></td></tr>
       <tr><td>7</td><td>Finishing &amp; Packing</td><td>Finishing</td><td>The finishing agency's <b>finished rolls</b> come into the Finished Goods Store</td></tr>
     </table>
@@ -425,11 +439,43 @@ table { margin: 3px 0 8px; }
     </table>
     <p><b>The ERP fills in by itself:</b></p>
     <ul class="auto">
-      <li><b>Wastage</b> 600 − 585 = <b>15 kg</b> (2.5%). Change it if the real waste was different.</li>
+      <li><b>Wastage</b> 600 − 585 = <b>15 kg</b> (2.5%). Change it if the real waste was different: type it in <b>kg or in %</b>, the other fills in.</li>
       <li><b>Job charges</b> ₹9 × 585 kg = <b>₹5,265</b>, added to Maa Tara Knitting's account.</li>
     </ul>
     <div class="stock"><div class="cap">Stock after this step</div><table><tr><td>Maa Tara Knitting</td><td>Yarn used up (600 kg)</td></tr><tr><td>Bengal Dyeing House</td><td><b>585 kg / 25 rolls</b> grey fabric, lot <b>L-0001</b>, ready to dye. <b>No transfer entry needed</b></td></tr></table></div>
     <p class="note" style="margin-top:4px"><b>Knitter keeping the fabric for now?</b> Choose <b>Maa Tara Knitting</b> itself in "Grey fabric sent to". Send it later with <b>Inventory → Send Grey for Dyeing</b>.</p>
+  </div>
+
+  <div class="step" style="--c: var(--knit)">
+    <div class="sh"><h2><span class="n">+</span>Knitting delivered in parts</h2><span class="who">Knitting</span></div>
+    <p class="what">The agency often does not bring all the fabric at once: you give <b>1,000 kg</b> of yarn and it brings <b>300 kg</b> of grey, then <b>400 kg</b>, and so on. Make <b>one knitting entry per delivery</b>.</p>
+    <ul class="auto">
+      <li>Choose the agency: its yarn lot fills in, and <b>This yarn lot at the agency</b> shows the yarn given and the deliveries before this one, with their wastage.</li>
+      <li>Type only the <b>grey received</b>. The yarn used fills in as grey + wastage. The wastage starts at the loss expected on the yarn issue (2.5%); type the real one in <b>kg or %</b> if you know it.</li>
+      <li>On the last one tick <b>Last delivery</b>: all the yarn still at the agency is counted as used, and what did not become fabric is the wastage.</li>
+    </ul>
+    <table>
+      <tr><th style="width:24%">Delivery</th><th style="width:22%">Grey received</th><th style="width:24%">Yarn used (fills in)</th><th>Wastage</th></tr>
+      <tr><td>1st</td><td>300 kg</td><td>307.692 kg</td><td>7.692 kg = 2.50% (expected)</td></tr>
+      <tr><td>2nd</td><td>400 kg, wastage % typed <b>3</b></td><td>412.371 kg</td><td>12.371 kg = 3.00%</td></tr>
+      <tr><td>3rd, <b>Last delivery</b> ticked</td><td>270 kg</td><td>279.937 kg (all that was left)</td><td>9.937 kg = 3.55%</td></tr>
+      <tr><td><b>In all</b></td><td><b>970 kg</b></td><td><b>1,000 kg</b></td><td><b>30 kg = 3.00%</b></td></tr>
+    </table>
+    <p><b>Production → Knitting Deliveries</b> shows this for every agency and yarn lot: yarn given, each delivery, grey received, wastage in kg and %, yarn still at the agency and <i>Part received</i> or <i>Completed</i>. If the agency returns unused yarn, send it back to the store (<b>Inventory → All Transfers</b>) before the last delivery.</p>
+  </div>
+
+  <div class="step" style="--c: var(--dye)">
+    <div class="sh"><h2><span class="n">+</span>Lot BOM: the lot's own materials</h2><span class="who">Dyeing · optional, once per lot</span></div>
+    <p class="what">How much dye, chemicals and packing each kg of <b>this lot's</b> fabric should take. Make it once; every dyeing and finishing entry for the lot then fills its materials from it.</p>
+    <div class="where">Production → Lot BOM → + New lot BOM</div>
+    <table>
+      <tr><th style="width:32%">Box</th><th>Fill</th></tr>
+      <tr><td>Lot no *</td><td><b>L-0001</b>. The list shows each lot in stock with what it holds and its kg; a lot that has not come in yet can be typed (for example <b>0987</b>). <i>Lot size</i> fills in with the lot's kg</td></tr>
+      <tr><td>Fabric to make / Color</td><td>Finished Single Jersey 30s / <b>Red</b> (they fill in on the finishing and dyeing entries)</td></tr>
+      <tr><td>Copy materials from</td><td><b>Recipe: Red Reactive Recipe</b>: Reactive Red <b>0.03</b>, Soda Ash <b>0.1</b>, Glauber Salt <b>0.5</b>, Silicone Softener <b>0.02</b> per kg. Or copy another lot's BOM and change what differs</td></tr>
+      <tr><td>Materials per 1 kg</td><td>Add Poly Bag <b>0.042</b> and Paper Core Tube <b>0.042</b> (one each per 24 kg roll). <i>Used in</i> shows the stage: <b>Dyeing</b> for dyes &amp; chemicals, <b>Finishing</b> for packing, <b>Knitting</b> for yarn (per kg of grey made)</td></tr>
+    </table>
+    <p><b>The ERP shows:</b> each material for the whole lot, and the material cost per kg of fabric at the item rates.</p>
   </div>
 
   <div class="step" style="--c: var(--dye)">
@@ -441,7 +487,7 @@ table { margin: 3px 0 8px; }
       <tr><td>Grey fabric</td><td>Grey Single Jersey 30s</td></tr>
       <tr><td>Lot no</td><td><b>L-0001</b> (the list shows the lots lying at this agency). Input qty fills in as <b>585</b></td></tr>
       <tr><td>Color / Shade</td><td>Red</td></tr>
-      <tr><td>Dye recipe</td><td>Only if <b>you supply</b> the dyes &amp; chemicals: pick one and they fill in for 585 kg, taken from the <b>Main Store</b>. If the agency uses its own, leave the table empty</td></tr>
+      <tr><td>Dyes &amp; chemicals</td><td>Only if <b>you supply</b> them, from the <b>Main Store</b>. They fill in from the <b>lot's BOM</b> for 585 kg (Reactive Red 17.55, Soda Ash 58.5, Glauber Salt 292.5, Silicone Softener 11.7), or pick a dye recipe. Change a line if the batch took more or less. If the agency uses its own, leave the table empty</td></tr>
       <tr><td>Colored fabric produced</td><td>Dyed Single Jersey 30s</td></tr>
       <tr><td>Output qty (kg)</td><td><b>570</b></td></tr>
       <tr><td>Dyed fabric sent to</td><td>Fills in as <b>Bengal Dyeing House</b> because it also finishes. For a separate finishing agency, choose that one</td></tr>
@@ -459,7 +505,7 @@ table { margin: 3px 0 8px; }
       <tr><td>Colored fabric</td><td>Dyed Single Jersey 30s</td></tr>
       <tr><td>Lot no</td><td><b>L-0001</b>. Input qty fills in as <b>570</b></td></tr>
       <tr><td>Finish</td><td>Compacting (or your finish)</td></tr>
-      <tr><td>Packing material</td><td>Only if <b>you supply</b> it: poly bag <b>24</b>, paper tube <b>24</b> (or pick a packing recipe)</td></tr>
+      <tr><td>Packing material</td><td>Only if <b>you supply</b> it. The lot's BOM fills <b>23.94</b> poly bags and paper tubes for 570 kg: type the real count, <b>24</b> (or pick a packing recipe)</td></tr>
       <tr><td>Finished goods produced</td><td>Finished Single Jersey 30s</td></tr>
       <tr><td>Output qty (kg) / Rolls</td><td><b>560</b> / <b>24</b>. Rolls fill in from the dyed lot; just count them, nobody needs to weigh each roll</td></tr>
       <tr><td>Meters</td><td><b>2200</b> (optional; gives you cost per meter)</td></tr>
@@ -486,9 +532,11 @@ table { margin: 3px 0 8px; }
       <tr><th style="width:40%">Where to look</th><th>What you see</th></tr>
       <tr><td><b>Inventory → Stock Summary</b> (Finished Goods Store)</td><td>560 kg / 24 rolls, lot L-0001, with its value</td></tr>
       <tr><td><b>Costing → Lot Costing Sheet</b></td><td>The exact cost of lot L-0001: yarn + dyes + packing + all job charges + overheads + wastage = <b>cost per kg, per roll, per meter</b></td></tr>
+      <tr><td><b>Production → Knitting Deliveries</b></td><td>For every agency and yarn lot: yarn given, each delivery of grey with its wastage in kg and %, the totals and the yarn still there</td></tr>
       <tr><td><b>Production → Agency Summary</b></td><td>For every agency: material lying there now, kg taken in and delivered, wastage %, job charges and what you owe it. Click an agency to see its lots</td></tr>
       <tr><td><b>Production → Batch / Lot Tracking</b></td><td>Lot L-0001 from the supplier's GRN (1,000 kg received) → 600 kg yarn knitted → 585 grey → 570 dyed → 560 finished = <b>93.3% yield</b>, then kg sold and kg left</td></tr>
       <tr><td><b>Wastage → Wastage Report</b></td><td>Knitting 15 kg, dyeing 15 kg, finishing 10 kg, with their value</td></tr>
+      <tr><td><b>Production → Lot BOM vs Actual</b></td><td>Each material of lot L-0001: as per its BOM, actually used, the difference and a status, <b>As per BOM</b> (within 2%), <b>Over BOM</b>, <b>Under BOM</b>, <b>Not used</b> or <b>Not in BOM</b>, with the cost of what was used. Click a line to open the BOM</td></tr>
     </table>
     <div class="tip"><b>For accurate costing</b> also enter each month's electricity bill (<b>Finance &amp; Accounts → Electricity Bills</b>) and factory expenses such as rent and repairs (<b>Expenses</b>, with <i>Add to production cost</i> ticked). The ERP spreads them over the kilograms finished that month.</div>
   </div>
@@ -558,7 +606,9 @@ table { margin: 3px 0 8px; }
       <tr><th style="width:40%">Where</th><th>What to do</th></tr>
       <tr><td><b>Bank &amp; Cash Accounts</b></td><td>Add each bank account once with its opening balance. <i>Cash in Hand</i> is already there</td></tr>
       <tr><td>Every receipt, payment, expense, salary, EMI</td><td>Choose the mode; the account fills in (cash = Cash in Hand). Change it if the money went through another bank</td></tr>
-      <tr><td><b>Payment Receipts</b> and <b>Supplier Payments</b>: the details</td><td>Each mode asks for its own: <b>Cheque</b> – cheque no. (must be filled), cheque date, bank &amp; branch. <b>UPI</b> – phone no or UPI ID, transaction ID. <b>Bank Transfer</b> – NEFT / RTGS / IMPS, UTR no, their bank (paying a supplier: also their account no &amp; IFSC). <b>Online</b> – paid through, transaction ID. <b>Cash</b> – who took or got the cash, receipt-book / voucher no</td></tr>
+      <tr><td><b>Payment Receipts</b> and <b>Supplier Payments</b>: the details</td><td>Each mode asks for its own: <b>Cheque</b> – cheque no. (must be filled), cheque date, bank &amp; branch. <b>UPI</b> – phone no or UPI ID, transaction ID. <b>Bank Transfer</b> – NEFT / RTGS / IMPS, UTR no, their bank (paying a supplier: also their account no &amp; IFSC). <b>Card (EDC / POS)</b> – card last 4 digits, approval / slip no. <b>Online</b> – paid through, transaction ID. <b>Cash</b> – who took or got the cash, receipt-book / voucher no</td></tr>
+      <tr><td><b>Sales → Sale Bills &amp; Dispatch</b></td><td>Opens on today: every bill with customer and city, salesman, each fabric with its lot, kg and rolls, bill value, money collected and how it was paid (or <i>Unpaid</i>, <i>Part paid</i>, <i>Cheque not cashed</i>). Top right: <i>3 invoices · 1,870 kg · 89 rolls</i></td></tr>
+      <tr><td><b>Finance &amp; Accounts → Salesman Collections</b></td><td>Opens on today: for each salesman the cash, UPI, card, RTGS / NEFT and cheque money received, the total, kg and rolls billed, and what their customers owe. A cheque counts on the day it is cashed. Click a salesman to see their bills. <b>Download PDF</b> opens the print window: choose <i>Save as PDF</i></td></tr>
       <tr><td><b>Cheques</b>: they count only once cashed</td><td>A cheque does not count until you fill in <i>Cheque cashed (cleared in bank) on</i>: the customer still owes it, the bill stays unpaid, the bank balance does not have it. When it shows in the bank statement, open the receipt or payment and fill in that date. <b>Cheques Not Cashed</b> lists every cheque still waiting; the dashboard warns about them</td></tr>
       <tr><td>Party master: <b>Bank &amp; UPI</b></td><td>Save a party's bank, account no, IFSC and UPI ID once; they fill in by themselves on its receipts and payments</td></tr>
       <tr><td><b>Bank Entries</b></td><td>Cash deposited, cash withdrawn, transfer between accounts, bank charges, interest</td></tr>
@@ -617,15 +667,30 @@ table { margin: 3px 0 8px; }
       <tr><th style="width:26%">Login</th><th>Works on</th></tr>
       <tr><td><b>Purchase</b></td><td>Masters, purchase orders, purchase bills</td></tr>
       <tr><td><b>Store / Inventory</b></td><td>Goods receipts (GRN), yarn issue to the knitting agencies, godown transfers, opening stock</td></tr>
-      <tr><td><b>Knitting</b></td><td>Knitting entries for each agency's delivery (the grey fabric goes to the dyeing agency chosen on the entry); send grey for dyeing; status updates</td></tr>
-      <tr><td><b>Dyeing / Color</b></td><td>Dyeing entries for each dyeing agency; status updates</td></tr>
-      <tr><td><b>Finishing &amp; Packing</b></td><td>Finishing entries for each finishing agency; status updates</td></tr>
+      <tr><td><b>Knitting</b></td><td>Knitting entries for each agency's delivery (the grey fabric goes to the dyeing agency chosen on the entry); send grey for dyeing; lot BOMs; status updates</td></tr>
+      <tr><td><b>Dyeing / Color</b></td><td>Lot BOMs; dyeing entries for each dyeing agency; status updates</td></tr>
+      <tr><td><b>Finishing &amp; Packing</b></td><td>Finishing entries for each finishing agency; lot BOMs; status updates</td></tr>
       <tr><td><b>Sales</b></td><td>Customers, leads &amp; follow-ups, quotations, price list, sales orders, challans, invoices</td></tr>
       <tr><td><b>Finance &amp; Accounts</b></td><td>Purchase bills, supplier and agency payments, customer receipts, bank &amp; cash, expenses, electricity bills, EMIs, staff &amp; salaries, GST reports</td></tr>
       <tr><td><b>Management / Admin</b></td><td>Everything, including the business dashboard and its alerts. Admin also manages users, settings, approvals and the activity log</td></tr>
     </table>
     <div class="tip"><b>Finding a choice fast:</b> every dropdown (customer, supplier, item, lot, agency, account, report filters …) is also a search box. Click it and type any part of the name, for example <i>kolk</i> or <i>jersey 30</i>: only matching choices stay. <b>↑ ↓</b> to move, <b>Enter</b> or <b>Tab</b> to pick, <b>Esc</b> to go back.</div>
     <div class="tip"><b>Saving:</b> press <b>Ctrl + S</b> or click <b>Save</b>. Your sign-in belongs to your own browser tab; close the tab or click the sign-out icon at the bottom of the menu when you leave the computer.</div>
+  </div>
+
+  <div class="sec">
+    <h2><span class="n">L</span>Remote support</h2>
+    <p class="what">Stuck on a screen? A support colleague can see it and, with your permission, work on it for you &mdash; nothing to install.</p>
+    <div class="where">Menu &rarr; Remote Support</div>
+    <table>
+      <tr><th style="width:34%">You (Get help)</th><th>Your support colleague (Give help)</th></tr>
+      <tr><td>Click <b>Start sharing</b> and choose <b>This tab</b>.</td><td>Needs the <b>Remote support</b> permission (the administrator sets it).</td></tr>
+      <tr><td>A bar appears at the top with a <b>6-character code</b> &mdash; read it out.</td><td>Type the code, click <b>Connect</b>, and the screen appears.</td></tr>
+      <tr><td>Turn on the <b>microphone</b> to talk (optional).</td><td>Talk back and guide you.</td></tr>
+      <tr><td>Tick <b>Allow support to control my screen</b> when you are ready.</td><td>Now their clicks, scrolling and typing work on your ERP.</td></tr>
+      <tr><td><b>Stop sharing</b>, or untick control, ends it at once.</td><td>They are told the session ended.</td></tr>
+    </table>
+    <div class="tip"><b>You are always in control:</b> control stays off until you allow it, the bar stays on your screen the whole time, and Stop ends everything. It only ever reaches the ERP in your browser, never the rest of your computer. Needs an address starting <b>https</b> (the office site) or the computer itself.</div>
   </div>
 </section>
 

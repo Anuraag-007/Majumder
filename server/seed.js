@@ -22,17 +22,17 @@ const BASE_LOCATIONS = [
 const ALL = lvl => Object.fromEntries(require('../public/js/shared').PERM_AREAS.map(a => [a.k, a.viewOnly && lvl !== 'none' ? 'view' : lvl]));
 const PRESET_ROLES = [
   { id: 'manager', name: 'Management', description: 'Owner / factory manager: sees and controls everything except users', perms: ALL('full') },
-  { id: 'operator', name: 'Data Entry (all modules)', description: 'Can enter and edit in every module but cannot delete', perms: Object.assign(ALL('edit'), { dashboard: 'none', rep_costing: 'none', rep_accounts: 'none', rep_gst: 'none', approvals: 'none', salary: 'none', banking: 'none' }) },
+  { id: 'operator', name: 'Data Entry (all modules)', description: 'Can enter and edit in every module but cannot delete', perms: Object.assign(ALL('edit'), { dashboard: 'none', rep_costing: 'none', rep_accounts: 'none', rep_gst: 'none', approvals: 'none', salary: 'none', banking: 'none', support: 'none' }) },
   { id: 'purchase', name: 'Purchase Department', description: 'Raises POs, books supplier bills',
     perms: { masters: 'edit', purchaseOrders: 'full', grn: 'view', purchaseBills: 'full', payments: 'view', rep_purchase: 'view', rep_inventory: 'view' } },
   { id: 'store', name: 'Store / Inventory', description: 'Receives material (GRN), issues yarn, keeps stock',
     perms: { purchaseOrders: 'view', grn: 'full', storeTransfers: 'full', stockAdjust: 'edit', rep_inventory: 'view', rep_purchase: 'view' } },
   { id: 'knitting', name: 'Knitting Department', description: 'Knitting production and grey fabric dispatch to color factory',
-    perms: { knitting: 'full', greyTransfer: 'full', jobStatus: 'full', rep_production: 'view', rep_inventory: 'view' } },
+    perms: { knitting: 'full', greyTransfer: 'full', jobStatus: 'full', lotBoms: 'edit', rep_production: 'view', rep_inventory: 'view' } },
   { id: 'dyeing', name: 'Dyeing / Color Department', description: 'Dyeing batches and chemical consumption',
-    perms: { dyeing: 'full', jobStatus: 'full', rep_production: 'view', rep_inventory: 'view' } },
+    perms: { dyeing: 'full', jobStatus: 'full', lotBoms: 'full', rep_production: 'view', rep_inventory: 'view' } },
   { id: 'finishing', name: 'Finishing & Packing', description: 'Finishing, packing and finished goods output',
-    perms: { finishing: 'full', jobStatus: 'full', rep_production: 'view', rep_inventory: 'view' } },
+    perms: { finishing: 'full', jobStatus: 'full', lotBoms: 'edit', rep_production: 'view', rep_inventory: 'view' } },
   { id: 'sales', name: 'Sales Department', description: 'Leads, quotations, orders, dispatch challans, invoices and customer prices',
     perms: { masters: 'edit', leads: 'full', quotations: 'full', priceList: 'full', salesOrders: 'full', deliveries: 'full', invoices: 'full', receipts: 'view', rep_sales: 'view', rep_inventory: 'view', rep_accounts: 'view' } },
   { id: 'accounts', name: 'Finance & Accounts', description: 'Receipts, payments, bank, expenses, salaries, EMIs, bills, GST and costing',
@@ -40,7 +40,7 @@ const PRESET_ROLES = [
       rep_accounts: 'view', rep_gst: 'view', rep_purchase: 'view', rep_sales: 'view', rep_costing: 'view', rep_inventory: 'view' } },
 ];
 // Areas added after the first release: ready-made roles that have never had them set get the preset level.
-const NEW_AREAS = ['labourPayments', 'approvals', 'leads', 'jobStatus', 'quotations', 'banking', 'loans', 'powerBills', 'staff', 'salary', 'rep_gst'];
+const NEW_AREAS = ['labourPayments', 'approvals', 'leads', 'jobStatus', 'quotations', 'banking', 'loans', 'powerBills', 'staff', 'salary', 'rep_gst', 'lotBoms', 'support'];
 
 function ensureBase(data) {
   const stamp = { createdAt: now(), createdBy: 'system' };
@@ -147,6 +147,11 @@ function loadDemo(data) {
   Object.assign(data.parties.find(p => p.id === P.SSM), { bankName: 'HDFC Bank, Howrah', bankAccount: '50200012345678', ifsc: 'HDFC0001234' });
   Object.assign(data.parties.find(p => p.id === P.KGP), { bankName: 'Axis Bank, Burrabazar' });
   Object.assign(data.parties.find(p => p.id === P.SUN), { upi: 'sunrise@okhdfcbank' });
+  // Salesmen and the customers each looks after: their bills and receipts are counted under them.
+  const SM = {};
+  for (const [k, name, area, phone] of [['RR', 'Rajesh Roy', 'Central Kolkata & Howrah market', '+91 98305 67890'], ['AS', 'Amit Sharma', 'Burrabazar & North 24 Parganas', '+91 98311 77889'],
+    ['BS', 'Bikash Sen', 'Siliguri, North Bengal & outstation', '+91 98333 99001']]) SM[k] = add('salesmen', null, { name, area, phone }).id;
+  for (const [k, s] of [['KGP', 'AS'], ['SUN', 'RR'], ['EHT', 'BS'], ['MKW', 'BS'], ['BGC', 'BS']]) data.parties.find(p => p.id === P[k]).salesman = SM[s];
   // Job-work agencies: two knitters, a dyeing house that also finishes, and a finishing house.
   const agencies = [
     ['AK1', 'Maa Tara Knitting Works', 'Howrah', { doesKnitting: true, knitRate: 8 }],
@@ -199,6 +204,12 @@ function loadDemo(data) {
       const bill = add('purchaseBills', 'PB', { date: day(s0 - 1), billDate: day(s0 - 1), billNo: 'B/' + (900 + seq), party: g.party, grnId: g.id, freight: po === poY ? 2500 : 0, lines: g.lines.map(l => ({ item: l.item, qty: l.qty, rate: l.rate, gst: itemGst(l.item) })) });
       openBills.push(bill);
     }
+    // The newest lot gets a BOM (Production -> Lot BOM): what each kg of its fabric should take. Its rib is
+    // still waiting at the dyeing house, so a new dyeing entry for it fills the dyes and chemicals from here.
+    // The softener is planned a little lower than the dyeing house uses (Lot BOM vs Actual shows it as over).
+    if (last) add('lotBoms', 'LB', { date: day(s0 - 1), lot: batch, lotKg: 1200, outItem: I.FSJ30, color: 'Maroon', remarks: 'Maroon single jersey and rib, 160 GSM',
+      lines: [{ item: I.Y30, qtyPerKg: 1.025 }, { item: I.DRED, qtyPerKg: 0.035 }, { item: I.CSODA, qtyPerKg: 0.1 }, { item: I.CSALT, qtyPerKg: 0.5 }, { item: I.CSOFT, qtyPerKg: 0.018 },
+        { item: I.PPOLY, qtyPerKg: 0.0425 }, { item: I.PTUBE, qtyPerKg: 0.0425 }, { item: I.PTAPE, qtyPerKg: 0.0035 }] });
     // pay last block's bills
     for (const bill of openBills.splice(0, openBills.length - 3)) {
       add('payments', 'PAY', { date: day(s0 - 2), party: bill.party, amount: bill.total, mode: 'Bank Transfer', transferType: bill.total > 200000 ? 'RTGS' : 'NEFT', refNo: String(70000 + seq) });
@@ -290,6 +301,10 @@ function loadDemo(data) {
   // one part-payment on the newest Kolkata invoice
   const lastKgp = openInv.find(i => i.party === P.KGP);
   if (lastKgp) add('receipts', 'RCT', { date: day(1), party: P.KGP, amount: 75000, mode: 'Cheque', refNo: '004512', chequeDate: day(1), payBank: 'Axis Bank, Burrabazar' });
+  // a card payment on the card machine today
+  add('receipts', 'RCT', { date: day(0), party: P.SUN, amount: 25000, mode: 'Card (EDC / POS)', card: 'Visa 4321', refNo: '845120' });
+  // bills and receipts carry their customer's salesman, as the screens fill it in
+  for (const d of data.invoices.concat(data.receipts)) { const s = data.parties.find(p => p.id === d.party).salesman; if (s) d.salesman = s; }
   // an open order waiting for dispatch
   add('salesOrders', 'SO', { date: day(2), party: P.SUN, deliveryDate: day(-10), status: 'Open', customerPo: 'SUN/88', lines: [{ item: I.FSJ30, qty: 250, rate: 428, gst: 5 }] });
   add('purchaseOrders', 'PO', { date: day(1), party: P.SSM, deliveryDate: day(-6), status: 'Open', lines: [{ item: I.Y30, qty: 1500, rate: 256, gst: 5 }] });

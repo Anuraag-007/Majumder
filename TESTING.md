@@ -131,11 +131,9 @@ Amount **100000**, mode Bank Transfer: boxes for *NEFT / RTGS / IMPS*, *UTR no* 
 
 Agency / unit: **Maa Tara Knitting**.
 
-✅ **Check:** Job rate changes to **9**, the agency's own rate.
+✅ **Check:** Job rate changes to **9**, the agency's own rate. The yarn line fills itself with Y30, lot **L-0001** (the only yarn at the agency), and *Lot no* shows **L-0001**: the grey fabric keeps the yarn's lot number. *This yarn lot at the agency* reads *Lot L-0001: 600 kg of yarn given · no delivery yet*.
 
-Yarn consumed: item Y30, yarn lot **L-0001 — 600 Kg**, qty **600**.
-
-✅ **Check:** Lot no now shows **L-0001**: the grey fabric keeps the yarn's lot number.
+Yarn consumed: qty **600** (all of it knitted in one go; for a part delivery leave it blank, see step 12b-22).
 
 Grey fabric produced: **GSJ**, output qty **585**, rolls **25**.
 
@@ -151,17 +149,29 @@ Grey fabric sent to: **Bengal Dyeing House**. Save → **KNT-0001**.
 
 ## Step 7 — Dyeing / Color Department (dyeing1)
 
+First the lot's BOM. **Production → Lot BOM → New**: lot no **L-0001** (the list shows what the lot holds and its kg).
+
+✅ **Check:** *Lot size (kg)* fills in with the kg of L-0001 in stock (the grey at the dyeing house and the yarn still in the store).
+
+Fabric to make **FSJ**, color **Red**. *Copy materials from*: **Recipe: Red Recipe (Dyeing)**.
+
+✅ **Check:** Two lines appear, *Used in* **Dyeing**: Reactive Red **0.02** and Soda Ash **0.1** per kg. *For the whole lot* shows 0.02 × the lot size.
+
+Add a line: **POLY**, qty per kg **0.04**.
+
+✅ **Check:** *Used in* shows **Finishing**. *Material cost per kg of fabric* is **14.20** (0.02 × 500 + 0.1 × 40 + 0.04 × 5). Save → **LB-0001**.
+
 **Production → Dyeing / Coloring → New**: agency / unit **Bengal Dyeing House**.
 
 ✅ **Check:** *Dyed fabric sent to* fills in as **Bengal Dyeing House**, because this agency also finishes. Job rate is **15**.
 
 Grey fabric GSJ, lot no **L-0001**.
 
-✅ **Check:** Input qty fills in as **585**.
+✅ **Check:** Input qty fills in as **585**. From the lot's BOM: *Lot BOM* says **LB-0001: 2 materials per kg, filled in below**, color **Red**, and two chemical lines **Reactive Red 11.7** and **Soda Ash 58.5**. Change the input qty to **500**: the dye becomes **10**; put it back to **585**.
 
-Pick dye recipe **Red Recipe**.
+Pick dye recipe **Red Recipe** (a recipe does the same for any lot).
 
-✅ **Check:** Two chemical lines appear: **Reactive Red 11.7** and **Soda Ash 58.5**.
+✅ **Check:** Still **Reactive Red 11.7** and **Soda Ash 58.5**.
 
 Color **Red**, colored fabric produced **CSJ**, output qty **570**.
 
@@ -175,11 +185,17 @@ The dyes and chemicals come from your Main Store here. If an agency uses its own
 
 **Production → Finishing & Packing → New**: agency / unit **Bengal Dyeing House**, colored fabric CSJ, lot **L-0001**. Input qty fills in as **570**; job rate **6**.
 
-Packing materials: **POLY, qty 24**. Finished goods produced **FSJ**.
+✅ **Check:** From the lot's BOM, packing **POLY 22.8** (0.04 × 570) and finished goods produced **FSJ** fill in.
+
+Change the POLY qty to **24** (one bag per roll).
 
 **Roll weights (kg):** type the weight of each of the 24 rolls with + between them. For this test, 23 rolls of 23.3 kg and one of 24.1 kg: `23.3 + 23.3 + …` (23 times) `+ 24.1`. Meters **2200**.
 
 ✅ **Check:** Output qty fills in as **560** and rolls as **24** by themselves. Wastage **10**, job charges **3,360**. Save → **FIN-0001**. The rolls go to the Finished Goods Store.
+
+**Production → Lot BOM vs Actual.**
+
+✅ **Check:** Lot L-0001 has three lines. Reactive Red and Soda Ash are **As per BOM** (11.7 and 58.5). Poly Bag: as per BOM **22.8**, actually used **24**, difference **1.2**, **5.26%**, status **Over BOM** in red. Click the Poly Bag line: it opens **Lot BOM LB-0001**.
 
 ---
 
@@ -314,6 +330,30 @@ Sign in as **admin**.
     ✅ **Check:** the message reads *Saved GRN-… · lot number SM/4471 (typed)*.
 16. Another **GRN → New**: Shree Mills, Y30, type **SM/4471** again.
     ✅ **Check:** the pop-up says *Lot number SM/4471 is already used* (in the GRN above). Click **Use the automatic number**: the box goes back to the greyed automatic number. Leave without saving.
+17. **Masters → Items → New**: code Y40, name *Old Cotton Yarn 40s*, Yarn, Kg, standard rate **240**. Under *Opening stock* type qty **200**.
+    ✅ **Check:** *Rate (₹ per unit)* fills in as 240, *Value* shows 48,000, and *Lot no* shows the next number greyed (*L-00… (auto)*).
+    Type **old/40** in *Lot no* and press Tab: the pop-up *Your own lot number: OLD/40* appears. Click **Use OLD/40**, Save.
+    ✅ **Check:** the message reads *Saved · opening stock lot number OLD/40 (typed)*; **Stock Summary** shows 200 kg of lot OLD/40 in the Main Store worth 48,000, and its **Stock Ledger** line *Opening stock* opens the item.
+18. **Masters → Salesmen → New**: *Rajesh Roy*, phone 98305 67890, area *Central Kolkata & Howrah market*. Save. **Masters → Parties** → Kolkata Garments: *Salesman* Rajesh Roy, Save.
+19. **Payment Receipts → New**: customer Kolkata Garments.
+    ✅ **Check:** *Salesman* fills in as Rajesh Roy.
+    Mode **Card (EDC / POS)**, amount **1000**, card *Visa 4321*, approval / slip no *845120*. Save.
+20. **Finance & Accounts → Salesman Collections** (opens on today).
+    ✅ **Check:** Rajesh Roy's row shows **1,000.00** under *Card (EDC / POS)* and in *Total collected*, with his area and phone under the name.
+21. **Sales → Sale Bills & Dispatch**, click **This FY**.
+    ✅ **Check:** each invoice shows customer and city, salesman, fabric with *Lot L-… · kg · rolls*, kg, rolls, bill value, collected and payment badges; the top right shows *… invoices · … kg · … rolls*. **Download sales PDF** opens the print window.
+22. Knitting delivered in parts. **Inventory → Yarn Issue to Knitting → New**: Maa Tara Knitting, item Y40, lot **OLD/40**, qty **200**.
+    ✅ **Check:** *Expected grey fabric* fills in as **195** (2.5% less). Save.
+    **Production → Knitting → New**: agency **Maa Tara Knitting**.
+    ✅ **Check:** the yarn line fills with Y40, lot OLD/40, and *This yarn lot at the agency* reads *Lot OLD/40: 200 kg of yarn given · no delivery yet*.
+    Grey fabric produced GSJ, output qty **60**.
+    ✅ **Check:** the yarn qty fills in as **61.538**, wastage **1.538** kg, wastage % **2.5**. Grey fabric sent to Maa Tara Knitting (keep it there). Save.
+    Another **Knitting → New**, same agency, output **80**, then type wastage % **3**.
+    ✅ **Check:** *This yarn lot at the agency* lists *1 delivery before this: 60 kg grey from 61.538 kg yarn, wastage 1.538 kg (2.50%)*. Yarn **82.474**, wastage **2.474** kg. Save.
+    A third **Knitting → New**, output **52**, tick **Last delivery**.
+    ✅ **Check:** the yarn becomes **55.988** (all that was left), wastage **3.988** kg = **7.12%**. Save.
+23. **Production → Knitting Deliveries**, tick *Include completed*, lot **OLD/40**.
+    ✅ **Check:** yarn given **200**, three deliveries (60, 80 and 52 kg with their wastage in kg and %), grey received **192** from 200 kg yarn, wastage **8** kg = **4.00%**, yarn still there **–**, status **Completed**.
 
 ---
 
@@ -334,9 +374,9 @@ Sign in as **admin**.
 |---|---|---|
 | purchase1 | Masters, purchase orders, bills, purchase & stock reports | Production, sales, receipts, users |
 | store1 | GRN, yarn issue, opening stock, stock reports | Production, invoices, bills, payments |
-| knitting1 | Knitting (the grey fabric goes to the dyeing agency chosen on the entry), send grey for dyeing for fabric kept at the knitter, production & stock reports | Dyeing, finishing, sales, GRN, yarn issue |
-| dyeing1 | Dyeing, production & stock reports | Knitting, finishing, sales, purchase |
-| finishing1 | Finishing & packing, production & stock reports | Knitting, dyeing, sales, GRN |
+| knitting1 | Knitting (the grey fabric goes to the dyeing agency chosen on the entry), send grey for dyeing for fabric kept at the knitter, lot BOMs, production & stock reports | Dyeing, finishing, sales, GRN, yarn issue |
+| dyeing1 | Dyeing, lot BOMs, production & stock reports | Knitting, finishing, sales, purchase |
+| finishing1 | Finishing & packing, lot BOMs, production & stock reports | Knitting, dyeing, sales, GRN |
 | sales1 | Customers, leads & follow-ups, quotations, price list, orders, challans, invoices, sales reports | Production, bills, payments, expenses, bank, salaries |
 | accounts1 | Receipts, payments, bills, expenses, bank & cash, electricity bills, loans & EMIs, staff & salaries, invoices (view only), accounts/GST/costing reports, dashboard | Production screens, users, approvals, activity log |
 | manager1 | Everything except users and roles | Users, roles |
@@ -344,6 +384,18 @@ Sign in as **admin**.
 A blocked screen shows **No access**, even when you type its address directly.
 
 ---
+
+## Remote support (manual, needs two browsers)
+
+1. In one browser, sign in as **admin** and open **Remote Support -> Start sharing**; choose *This tab*. A bar shows a 6-character code.
+2. In a second browser (or another computer), sign in as a user with the **Remote support** permission (Management, or a role you gave it). Open **Remote Support -> Give help**, type the code, **Connect**.
+   - Check: the first browser's bar reads *"<name> is viewing your screen"*; the helper sees the first screen.
+3. In the first browser tick **Allow support to control my screen**.
+   - Check: the helper's badge turns green. The helper can click a menu item and open a form on the shared screen; clicking a field there and typing in the helper's small box fills it.
+4. Press **Stop sharing**.
+   - Check: the bar disappears, the helper is told the session ended, and **Admin -> Activity Log** shows who shared and who helped.
+
+Needs an `https` site or `localhost` (browsers allow screen share and the microphone only there).
 
 ## Automated version of this test
 
@@ -353,6 +405,6 @@ The same scenario runs automatically, with a browser signing in as each departme
 npm test
 ```
 
-It needs Node.js 22.13 or newer and Google Chrome or Microsoft Edge. It uses a temporary database, so your real data is never touched. It runs four checks in turn: the storage test (data and sign-ins survive restarts, old `db.json` import), the API rules (including cheque / UPI / bank transfer details, cheques counting only once cashed, split receipts, bank book and reconciliation, expenses, electricity bills, salary from attendance, salary privacy, EMIs, leads, quotations, godowns, lot number format, job work delays, processing status, GSTR-1 / 3B, approvals and the activity log), the two-tab sign-in test, and this department walkthrough. Each prints a pass/fail line for every check; the walkthrough ends with *ALL 139 CHECKS PASSED*.
+It needs Node.js 22.13 or newer and Google Chrome or Microsoft Edge. It uses a temporary database, so your real data is never touched. It runs five checks in turn: the storage test (data and sign-ins survive restarts, old `db.json` import), the API rules (including cheque / UPI / bank transfer details, cheques counting only once cashed, split receipts, bank book and reconciliation, expenses, electricity bills, salary from attendance, salary privacy, EMIs, leads, quotations, godowns, lot number format, lot BOMs and Lot BOM vs Actual, job work delays, knitting delivered in parts with wastage in kg and %, processing status, GSTR-1 / 3B, approvals and the activity log), the two-tab sign-in test, the remote-support relay test (sign-in, the Remote support permission, the one-time code, and that the agent's actions reach the screen only while the user allows control), and this department walkthrough. Each prints a pass/fail line for every check; the walkthrough ends with *ALL 144 CHECKS PASSED*.
 
 It also checks, for every department login, that the menu, each screen and the server all agree on what that login may open or change: about 200 checks per login.

@@ -12,13 +12,30 @@
  * adds its own labour / chemicals / wastage. The finished lot therefore knows
  * exactly what it cost and why.
  */
-const { r2, r3, num, applyTotals, partyIs, workOf: S_workOf, STATE_NAMES, checkGstin, levelAtLeast, STAGES, STAGE_LABELS, parseRolls, fmtRolls, allocRolls, LOT_CATEGORIES, lotFmt, lotPattern, mainLot, doesWork,
-  isGodown, COST_CATEGORIES, ATTENDANCE, stateCode, PAY_DETAILS, PAY_DETAIL_KEYS, payDetail } = require('../public/js/shared');
+const { r2, r3, num, applyTotals, partyIs, workOf: S_workOf, STATE_NAMES, checkGstin, levelAtLeast, STAGES, STAGE_LABELS, BOM_STAGE, parseRolls, fmtRolls, allocRolls, LOT_CATEGORIES, lotFmt, lotPattern, mainLot, doesWork,
+  isGodown, COST_CATEGORIES, ATTENDANCE, stateCode, CARD_MODE, PAY_DETAILS, PAY_DETAIL_KEYS, payDetail } = require('../public/js/shared');
 
 const BUCKETS = ['yarn', 'dyes', 'packing', 'otherMat', 'knitLabour', 'dyeLabour', 'finLabour', 'overhead', 'wastage'];
 const CAT_BUCKET = { 'Yarn': 'yarn', 'Dyes & Chemicals': 'dyes', 'Packing Material': 'packing' };
 const STOCK_COLS = ['stockAdjust', 'grn', 'transfers', 'knitting', 'dyeing', 'finishing', 'deliveries', 'invoices'];
 const EPS = 1e-6;
+
+// Opening stock typed on the item itself (the stock in hand when the ERP is started, e.g. moving from
+// another software). It counts as one opening stock line of that item, at its location and date (no date
+// = before every entry), and shows as "Opening stock" (collection 'items', the item's id) in the ledger.
+const OPENING_KEYS = ['openingQty', 'openingRate', 'openingLoc', 'openingLot', 'openingLotCustom', 'openingRolls', 'openingDate'];
+function openingDocs(data) {
+  return (data.items || []).filter(it => num(it.openingQty) > 0).map(it => ({ id: it.id, no: '', name: it.name, date: it.openingDate || '', location: it.openingLoc || 'STORE',
+    lines: [{ item: it.id, lot: it.openingLot || '', qty: num(it.openingQty), rate: num(it.openingRate), rolls: num(it.openingRolls), lotCustom: !!it.openingLotCustom }] }));
+}
+// Every entry that moves stock, as [collection, entry], the items' opening stock included.
+function stockDocs(data) {
+  const out = [];
+  for (const c of STOCK_COLS) for (const d of data[c] || []) out.push([c, d]);
+  for (const d of openingDocs(data)) out.push(['items', d]);
+  return out;
+}
+const docLabel = (c, d) => c === 'items' ? 'the opening stock of ' + d.name : (DOC_LABELS[c] || c) + ' ' + (d.no || '');
 
 const vz = () => { const v = {}; for (const b of BUCKETS) v[b] = 0; return v; };
 const vadd = (a, b, k = 1) => { for (const x of BUCKETS) a[x] += (b[x] || 0) * k; return a; };
@@ -39,7 +56,7 @@ function lotMaker(data, date) {
   const norm = v => String(v).trim().toUpperCase();
   const used = new Set(), custom = new Set();
   const add = v => { if (v) used.add(norm(v)); };
-  for (const c of STOCK_COLS) for (const d of data[c] || []) { add(d.lotNo); add(d.outLot); for (const l of d.lines || []) { add(l.lot); if (l.lotCustom && l.lot) custom.add(norm(l.lot)); } }
+  for (const [, d] of stockDocs(data)) { add(d.lotNo); add(d.outLot); for (const l of d.lines || []) { add(l.lot); if (l.lotCustom && l.lot) custom.add(norm(l.lot)); } }
   const esc = t => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const shape = new RegExp('^' + lotPattern(pattern).replace(/\{YYYY\}/g, day.slice(0, 4)).split(/#+/).map(esc).join('(\\d+)') + '$');
   let n = 0;
@@ -53,9 +70,9 @@ function lotMaker(data, date) {
 const LOT_OK = /^[A-Z0-9][A-Z0-9 ._/-]{0,29}$/;
 // The first other entry holding this lot, e.g. "Knitting KNT-0003" (a lot in use keeps its number).
 function lotUsedBy(data, lot, selfId) {
-  for (const c of STOCK_COLS) for (const d of data[c] || []) {
+  for (const [c, d] of stockDocs(data)) {
     if (d.id === selfId) continue;
-    if (d.lotNo === lot || d.outLot === lot || (d.lines || []).some(l => l.lot === lot)) return (DOC_LABELS[c] || c) + ' ' + (d.no || '');
+    if (d.lotNo === lot || d.outLot === lot || (d.lines || []).some(l => l.lot === lot)) return docLabel(c, d);
   }
   return '';
 }
@@ -203,12 +220,16 @@ function compute(data) {
   }
 
   const evs = [];
-  for (const c of STOCK_COLS) for (const d of data[c] || []) evs.push({ col: c, doc: d, date: d.date || '' });
+  for (const [c, d] of stockDocs(data)) evs.push({ col: c, doc: d, date: d.date || '' });
   evs.sort((a, b) => byDate(a.doc, b.doc));
 
   for (const ev of evs) {
     const d = ev.doc, lines = d.lines || [];
     switch (ev.col) {
+      case 'items': { // opening stock typed on the item
+        for (const l of lines) { stockIn(ev, l.item, d.location, l.lot, l.qty, matVec(l.item, l.qty * l.rate), l.rolls); received(d, l, ''); }
+        break;
+      }
       case 'stockAdjust': {
         const loc = d.location || 'STORE';
         for (const l of lines) {
@@ -294,16 +315,17 @@ const dmyOf = s => String(s || '').split('-').reverse().join('-');
 // in bank on"); until then it is pending: the customer still owes it, the supplier is still owed it, and the
 // bank does not have it. Other modes count on the entry's date. A split entry counts part by part.
 function whenCounts(d) {
-  const parts = Array.isArray(d.parts) && d.parts.length > 1 ? d.parts : [d];
   const days = {};
-  let pending = 0;
-  for (const p of parts) {
-    if (p.mode === 'Cheque' && !d.clearedOn) { pending += num(p.amount); continue; }
-    const on = p.mode === 'Cheque' ? d.clearedOn : d.date || '';
-    days[on] = (days[on] || 0) + num(p.amount);
-  }
+  for (const p of countedParts(d)) days[p.date] = (days[p.date] || 0) + p.amount;
+  const pending = payParts(d).filter(p => p.mode === 'Cheque' && !d.clearedOn).reduce((t, p) => t + num(p.amount), 0);
   const list = Object.entries(days).map(([date, amount]) => ({ date, amount: r2(amount) }));
   return { days: list, counted: r2(list.reduce((t, x) => t + x.amount, 0)), pending: r2(pending) };
+}
+const payParts = d => Array.isArray(d.parts) && d.parts.length > 1 ? d.parts : [d];
+// The money of a receipt / payment as it counts, part by part and with its way of paying: [{ date, amount, mode }].
+function countedParts(d) {
+  return payParts(d).filter(p => !(p.mode === 'Cheque' && !d.clearedOn))
+    .map(p => ({ date: p.mode === 'Cheque' ? d.clearedOn : d.date || '', amount: num(p.amount), mode: p.mode || '' }));
 }
 // The counted money of receipts / payments, each on the day it counts (for totals by day or month).
 const countedDays = list => (list || []).flatMap(d => whenCounts(d).days);
@@ -479,7 +501,8 @@ function partyTxns(data) {
 
 // How much of each sales invoice / purchase bill is still unpaid. Receipts naming an invoice settle
 // that invoice first; everything else settles the oldest bills first (like the ageing).
-// Returns { docId: { total, paid, due, status, dueDate } }.
+// Returns { docId: { total, paid, due, status, dueDate } }; a sales invoice also gets `modes`: the ways
+// of paying (Cash, UPI, Cheque ...) of the money that settled it.
 function billStatus(data) {
   const out = {};
   const day = today();
@@ -499,17 +522,23 @@ function billStatus(data) {
     const ob = num(p.openingBalance);
     const bills = sortB(list.map(d => ({ id: d.id, date: d.date, no: d.no, total: num(d.total), doc: d })));
     if (ob && p.openingType !== 'Cr') bills.unshift({ id: '_ob', date: '', total: ob });
-    let pool = ob && p.openingType === 'Cr' ? ob : 0;
-    const direct = [];
-    // a cheque not yet cashed pays nothing yet
-    for (const r of rec[pid] || []) { const amt = whenCounts(r).counted; if (!amt) continue; if (r.invoiceId) direct.push([r.invoiceId, amt]); else pool += amt; }
-    const left = settle(bills, pool, direct);
+    // Money in date order, piece by piece with its way of paying (a cheque not yet cashed pays nothing yet).
+    // A receipt naming an invoice pays that invoice first; the rest goes to the oldest bills.
+    const left = new Map(bills.map(b => [b, num(b.total)])), modes = new Map(bills.map(b => [b, new Set()]));
+    const pool = ob && p.openingType === 'Cr' ? [{ amt: ob, mode: '' }] : [];
+    const take = (b, x) => { const t = Math.min(left.get(b), x.amt); if (t <= 0) return; left.set(b, left.get(b) - t); x.amt -= t; if (t > 0.005 && x.mode) modes.get(b).add(x.mode); };
+    for (const r of (rec[pid] || []).slice().sort(byDate)) for (const c of countedParts(r)) {
+      const x = { amt: c.amount, mode: c.mode }, own = r.invoiceId && bills.find(y => y.id === r.invoiceId);
+      if (own) take(own, x);
+      if (x.amt > 0) pool.push(x);
+    }
+    for (const b of bills) for (const x of pool) { if (left.get(b) <= 0) break; take(b, x); }
     for (const b of bills) {
       if (!b.doc) continue;
       const due = r2(Math.max(0, left.get(b)));
       const dueDate = b.doc.dueDate || (num(p.creditDays) ? addDays(b.date, num(p.creditDays)) : '');
       const status = due < 0.5 ? 'Paid' : dueDate && dueDate < day ? 'Overdue' : due < b.total - 0.5 ? 'Part paid' : 'Unpaid';
-      out[b.id] = { total: r2(b.total), paid: r2(b.total - due), due, status, dueDate };
+      out[b.id] = { total: r2(b.total), paid: r2(b.total - due), due, status, dueDate, modes: [...modes.get(b)] };
     }
   }
   // suppliers: purchase bills and agency job charges, settled by payments
@@ -580,6 +609,7 @@ function prepare(col, doc, data) {
     o.rollWeights = fmtRolls(w); o[qtyKey] = r3(w.reduce((t, x) => t + x, 0)); o.rolls = w.length;
   };
   if (col === 'finishing') weighed(doc, 'outQty');
+  if (col === 'knitting' && !doc.lastDelivery) delete doc.lastDelivery;
   for (const l of doc.lines || []) {
     if (col === 'stockAdjust' && num(l.qty) >= 0) weighed(l, 'qty'); else delete l.rollWeights;
     // Rolls picked on a challan / invoice / transfer: the roll count is the number of pieces
@@ -590,7 +620,14 @@ function prepare(col, doc, data) {
     l.rollPick = p; l.rolls = p.length;
   }
   lotNumbers(col, doc, data);
-  const party = (data.parties || []).find(p => p.id === doc.party);
+  if (col === 'items') openingStock(doc, data);
+  // A lot BOM: its lot number as lot numbers are kept (in capitals), and plain numbers.
+  if (col === 'lotBoms') {
+    doc.lot = String(doc.lot || '').trim().replace(/\s+/g, ' ').toUpperCase();
+    if (doc.lotKg === '' || doc.lotKg === null || doc.lotKg === undefined) delete doc.lotKg; else doc.lotKg = r3(num(doc.lotKg));
+    for (const l of doc.lines || []) l.qtyPerKg = num(l.qtyPerKg);
+  }
+  const party =(data.parties || []).find(p => p.id === doc.party);
   applyTotals(col, doc, data.settings, party);
   // Money received or paid in more than one way (part cash, part bank): the parts add up to the amount.
   // The entry and each part keep the details of their way of paying (cheque no. and bank, UPI phone ...).
@@ -677,6 +714,39 @@ function lotNumbers(col, doc, data) {
   }
 }
 
+// Opening stock typed on an item: tidied, and (yarn and fabric) given a lot number the way an opening stock
+// line is: the next automatic number, or the one typed (once, in capitals). No quantity = no opening stock.
+function openingStock(doc, data) {
+  const bad = msg => { throw Object.assign(new Error(msg), { status: 400 }); };
+  const old = doc.id ? (data.items || []).find(r => r.id === doc.id) : null;
+  const oldLot = old && num(old.openingQty) > 0 ? old.openingLot || '' : '';
+  if (String(doc.openingQty === undefined || doc.openingQty === null ? '' : doc.openingQty).trim() === '' || num(doc.openingQty) === 0) for (const k of OPENING_KEYS) delete doc[k];
+  else {
+    doc.openingQty = r3(num(doc.openingQty));
+    doc.openingRate = r2(num(doc.openingRate));
+    doc.openingLoc = doc.openingLoc || 'STORE';
+    if (num(doc.openingRolls) > 0) doc.openingRolls = Math.round(num(doc.openingRolls)); else delete doc.openingRolls;
+    if (!doc.openingDate) delete doc.openingDate;
+    let lot = String(doc.openingLot || '').trim().replace(/\s+/g, ' ');
+    delete doc.openingLotCustom;
+    if (!LOT_CATEGORIES.includes(doc.category)) lot = '';
+    else if (lot && lot.toUpperCase() === oldLot.toUpperCase()) { lot = oldLot; if (old.openingLotCustom) doc.openingLotCustom = true; }
+    else if (!lot) lot = lotMaker(data, doc.openingDate)();
+    else {
+      lot = lot.toUpperCase();
+      if (!LOT_OK.test(lot)) bad('Lot no "' + lot + '": use letters, digits, - / . _ and spaces only (up to 30)');
+      if (lotMaker(data, doc.openingDate).exists(lot)) bad('Lot no ' + lot + ' is already used. Leave the lot no blank for the next automatic number, or type another');
+      doc.openingLotCustom = true;
+    }
+    if (lot) doc.openingLot = lot; else delete doc.openingLot;
+  }
+  // A lot already taken further (issued, knitted, moved, sold) keeps its number.
+  if (oldLot && doc.openingLot !== oldLot) {
+    const by = lotUsedBy(data, oldLot, doc.id);
+    if (by) bad('Lot ' + oldLot + ' is already used in ' + by + ': the lot number of this opening stock cannot be changed or removed');
+  }
+}
+
 function validate(col, doc, data) {
   const need = (cond, msg) => { if (!cond) throw Object.assign(new Error(msg), { status: 400 }); };
   const isDoc = col in DOC_LABELS;
@@ -700,7 +770,15 @@ function validate(col, doc, data) {
     need(!(data[col] || []).some(r => r.id !== doc.id && (r[field] || '').toString().trim().toLowerCase() === v), label + ' "' + doc[field] + '" already exists');
   };
   switch (col) {
-    case 'items': unique('name', 'Item name'); need(doc.category, 'Category is required'); if (doc.code) unique('code', 'Item code'); break;
+    case 'items':
+      unique('name', 'Item name'); need(doc.category, 'Category is required'); if (doc.code) unique('code', 'Item code');
+      if (doc.openingQty !== undefined) {
+        need(num(doc.openingQty) > 0, 'Opening stock cannot be less than zero');
+        need(num(doc.openingRate) >= 0, 'Opening stock rate cannot be less than zero');
+        need((data.locations || []).some(l => l.id === doc.openingLoc), 'Choose where the opening stock is kept from the list');
+        need(!doc.openingDate || /^\d{4}-\d{2}-\d{2}$/.test(doc.openingDate), 'Opening stock "as on" date is not a date');
+      }
+      break;
     case 'parties': {
       unique('name', 'Party name'); need(doc.type, 'Party type is required');
       if (doc.state) need(STATE_NAMES.includes(doc.state), 'Choose the state from the list');
@@ -709,10 +787,29 @@ function validate(col, doc, data) {
       break;
     }
     case 'units': unique('code', 'Unit symbol'); break;
+    case 'salesmen': unique('name', 'Salesman name'); break;
     case 'locations': unique('name', 'Location name'); break;
     case 'machines': unique('code', 'Machine code'); break;
     case 'processes': unique('name', 'Process name'); break;
     case 'boms': unique('name', 'Recipe name'); need(lines.length, 'Add at least one ingredient'); break;
+    // One BOM per lot: the materials a kg of its fabric should take, each used by the stage its category belongs to.
+    case 'lotBoms': {
+      need(doc.lot, 'Lot no is required');
+      need(LOT_OK.test(doc.lot), 'Lot no "' + doc.lot + '": use letters, digits, - / . _ and spaces only (up to 30)');
+      const twin = (data.lotBoms || []).find(r => r.id !== doc.id && r.lot === doc.lot);
+      need(!twin, 'Lot ' + doc.lot + ' already has a BOM' + (twin && twin.no ? ' (' + twin.no + ')' : '') + ': open that one to change it');
+      need(doc.lotKg === undefined || doc.lotKg >= 0, 'Lot size cannot be less than zero');
+      need(lines.length, 'Add at least one material');
+      const seen = new Set();
+      for (const l of lines) {
+        const it = (data.items || []).find(i => i.id === l.item);
+        need(it && BOM_STAGE[it.category], 'A lot BOM takes yarn, dyes & chemicals, packing material and other material');
+        need(l.qtyPerKg > 0, it.name + ': the qty per kg must be more than zero');
+        need(!seen.has(l.item), it.name + ' is in the BOM twice: keep one line');
+        seen.add(l.item);
+      }
+      break;
+    }
     case 'priceList': need(doc.party && doc.item, 'Party and item are required'); need(num(doc.rate) > 0, 'Rate is required'); break;
     case 'users': doc.username = String(doc.username || '').trim(); need(!/\s/.test(doc.username), 'Username cannot contain spaces'); unique('username', 'Username'); need(doc.role === 'admin' || (data.roles || []).some(r => r.id === doc.role), 'Choose a valid role'); break;
     case 'roles': {
@@ -797,7 +894,7 @@ const DOC_LABELS = {
   overheads: 'Expense', salesOrders: 'Sales Order', deliveries: 'Delivery Challan', invoices: 'Invoice', receipts: 'Receipt',
   labourPayments: 'Labour Payment',
   leads: 'Lead', quotations: 'Quotation', jobStatus: 'Status Update', bankEntries: 'Bank Entry', attendance: 'Attendance',
-  salary: 'Salary', emiPayments: 'EMI Payment', powerBills: 'Electricity Bill',
+  salary: 'Salary', emiPayments: 'EMI Payment', powerBills: 'Electricity Bill', lotBoms: 'Lot BOM',
 };
 
 /* ------------------------------------------------------------------ */
@@ -824,6 +921,12 @@ function buildReports(ctx) {
   const workPlace = id => !!locs[id] && !storeSide(id);
   const day = today();
   const dmy = s => s ? s.split('-').reverse().join('-') : '';
+  // A bill's or receipt's salesman: its own, else its customer's. The salesman filter: an id, or "none".
+  const salesmen = index(data.salesmen);
+  const salesmanOf = d => d.salesman || (parties[d.party] || {}).salesman || '';
+  const salesmanIs = id => !q.salesman || (q.salesman === 'none' ? !id : id === q.salesman);
+  const smName = id => salesmen[id] ? salesmen[id].name : '';
+  const rangeText = () => !q.from && !q.to ? '' : q.from === q.to ? ' on ' + dmy(q.from) : (q.from ? ' from ' + dmy(q.from) : '') + (q.to ? ' to ' + dmy(q.to) : '');
 
   // Material sent to agencies: transfers (yarn issue, grey for dyeing ...) and production output sent
   // straight on to the next agency. Material still at the agency is matched to the newest sends of the
@@ -851,6 +954,40 @@ function buildReports(ctx) {
         status: p <= 0.0005 ? 'Completed' : late ? 'Overdue ' + late + ' day' + (late === 1 ? '' : 's') : s.qty - p > 0.0005 ? 'Part done' : 'At agency' });
     }
     return sends.sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  // Yarn given to each knitting agency (or own factory), lot by lot, and the grey fabric delivered against it,
+  // delivery by delivery: 1,000 kg given, then 300 kg of grey, 400 kg ... each with its wastage in kg and %.
+  // `left` is the yarn of the lot still there; `expectedPct` the loss expected on the yarn issues (expected grey).
+  function knitProgress() {
+    const m = new Map();
+    const get = (loc, lot) => { const k = loc + '|' + lot; return m.get(k) || m.set(k, { loc, lot, items: new Set(), given: 0, first: '', returned: 0, left: 0, expected: 0, expBase: 0, deliveries: [] }).get(k); };
+    for (const r of R.ledger) {
+      if (iCat(r.item) !== 'Yarn' || !workPlace(r.loc)) continue;
+      const e = get(r.loc, r.lot);
+      e.items.add(r.item);
+      if (r.qin > 0) { e.given += r.qin; if (!e.first || r.date < e.first) e.first = r.date; }
+      else if (r.col !== 'knitting') e.returned += r.qout; // sent back to a store, or on to another place
+      e.left += r.qin - r.qout;
+    }
+    for (const t of data.transfers) {
+      const total = (t.lines || []).reduce((a, l) => a + num(l.qty), 0);
+      if (t.purpose !== 'Yarn Issue' || !(num(t.expectedQty) > 0) || !total) continue;
+      for (const l of t.lines || []) { const e = get(t.toLoc, l.lot || ''); e.expected += num(t.expectedQty) * num(l.qty) / total; e.expBase += num(l.qty); }
+    }
+    for (const d of data.knitting || []) {
+      const e = get(d.location || 'KNIT', d.lotNo || '');
+      for (const l of d.lines || []) if (l.item) e.items.add(l.item);
+      e.deliveries.push({ id: d.id, no: d.no || '', date: d.date || '', createdAt: d.createdAt || '', grey: num(d.outQty), yarn: (d.lines || []).reduce((a, l) => a + num(l.qty), 0), waste: num(d.wastageQty), rolls: num(d.rolls), last: !!d.lastDelivery });
+    }
+    return [...m.values()].filter(e => e.given > 0 || e.deliveries.length).map(e => {
+      e.deliveries.sort(byDate);
+      const sum = k => e.deliveries.reduce((a, x) => a + x[k], 0);
+      const left = Math.max(0, r3(e.left));
+      return Object.assign(e, { grey: r3(sum('grey')), yarn: r3(sum('yarn')), waste: r3(sum('waste')), rolls: sum('rolls'), left, returned: r3(e.returned),
+        expectedPct: e.expBase ? r2((1 - e.expected / e.expBase) * 100) : null,
+        status: !e.deliveries.length ? 'Not started' : left > 0.0005 ? 'Part received' : 'Completed' });
+    });
   }
 
   // Bank and cash accounts with their balance on `asOn` (all dates when blank).
@@ -979,7 +1116,7 @@ function buildReports(ctx) {
         if (q.to && r.date > q.to) continue;
         if (!rows.length) rows.push({ date: q.from || '', doc: 'Opening balance', location: '', lot: '', qin: 0, qout: 0, value: 0, balQty: r3(bq), balValue: r2(bv) });
         bq += r.qin - r.qout; bv += r.value;
-        rows.push({ date: r.date, doc: docName(r.col) + ' ' + (r.docNo || ''), party: pName(r.party), location: lName(r.loc), lot: r.lot, qin: r3(r.qin), qout: r3(r.qout), value: r2(r.value), balQty: r3(bq), balValue: r2(bv), _link: link(r.col, r.docId) });
+        rows.push({ date: r.date, doc: (docName(r.col) + ' ' + (r.docNo || '')).trim(), party: pName(r.party), location: lName(r.loc), lot: r.lot, qin: r3(r.qin), qout: r3(r.qout), value: r2(r.value), balQty: r3(bq), balValue: r2(bv), _link: link(r.col, r.docId) });
       }
       return {
         title: 'Stock Ledger - ' + iName(q.item),
@@ -1122,6 +1259,69 @@ function buildReports(ctx) {
       };
     },
 
+    // Each lot's BOM (Production -> Lot BOM) beside what its knitting, dyeing and finishing entries really took.
+    // "As per BOM" = qty per kg x the kg that went through the stage: grey fabric knitted (yarn), fabric taken
+    // into dyeing (dyes & chemicals) or finishing (packing). Within 2% of the BOM counts as as per BOM.
+    bomVsActual() {
+      const TRACE = { Knitting: 'knit', Dyeing: 'dye', Finishing: 'fin' };
+      const DONE = { Knitting: 'knitted', Dyeing: 'dyed', Finishing: 'finished' };
+      // what each production entry took besides the fabric it worked on: entry id -> item -> { qty, value }
+      const fabricIn = {}, took = {}, made = new Set(['knitting', 'dyeing', 'finishing']);
+      for (const c of ['dyeing', 'finishing']) for (const d of data[c] || []) fabricIn[d.id] = d.inItem;
+      for (const r of R.ledger) {
+        if (!(r.qout > 0) || !made.has(r.col) || r.item === fabricIn[r.docId]) continue;
+        const m = took[r.docId] || (took[r.docId] = {}), u = m[r.item] || (m[r.item] = { qty: 0, value: 0 });
+        u.qty += r.qout; u.value -= r.value;
+      }
+      const canOpen = levelAtLeast(ctx.perms.lotBoms, 'view');
+      const perKgText = v => String(+num(v).toFixed(6));
+      const rows = [], lots = new Set();
+      const boms = (data.lotBoms || []).filter(b => !q.lot || b.lot.toLowerCase().includes(q.lot.toLowerCase()))
+        .sort((a, b) => a.lot.localeCompare(b.lot, undefined, { numeric: true }));
+      for (const b of boms) {
+        const t = R.lotInfo[R.rootOf[b.lot] || b.lot] || { knit: [], dye: [], fin: [] };
+        for (const st of STAGES) {
+          if (q.stage && q.stage !== st) continue;
+          const runs = t[TRACE[st]];
+          const base = r3(runs.reduce((a, x) => a + (st === 'Knitting' ? x.outQty : x.inQty), 0));
+          const used = {};
+          for (const x of runs) for (const [item, u] of Object.entries(took[x.docId] || {})) { const e = used[item] || (used[item] = { qty: 0, value: 0 }); e.qty += u.qty; e.value += u.value; }
+          const plan = (b.lines || []).filter(l => BOM_STAGE[iCat(l.item)] === st);
+          if (!plan.length) continue; // the BOM does not cover this stage (e.g. no yarn in it)
+          const lines = plan.map(l => [l.item, num(l.qtyPerKg)]).concat(Object.keys(used).filter(i => !plan.some(l => l.item === i)).map(i => [i, null]));
+          for (const [item, perKg] of lines) {
+            const u = used[item] || { qty: 0, value: 0 };
+            const want = perKg === null ? 0 : r3(perKg * base), got = r3(u.qty), diff = r3(got - want);
+            const pct = want ? r2(diff / want * 100) : '';
+            const status = perKg === null ? 'Not in BOM' : !base ? 'Not started' : !got ? 'Not used' : want && Math.abs(pct) <= 2 ? 'As per BOM' : diff > 0 ? 'Over BOM' : 'Under BOM';
+            rows.push({
+              lot: b.lot, lotSub: lots.has(b.lot) ? '' : [iName(b.outItem), b.color].filter(Boolean).join(' · '),
+              stage: st, stageSub: base ? r3(base).toLocaleString('en-IN') + ' kg ' + DONE[st] : 'not ' + DONE[st] + ' yet',
+              item: iName(item), perKg: perKg === null ? '' : perKgText(perKg),
+              itemSub: [iUnit(item), perKg === null ? 'not in the BOM' : 'BOM ' + perKgText(perKg) + ' per kg'].filter(Boolean).join(' · '),
+              want, got, diff, pct, status, cost: r2(u.value), _link: canOpen ? link('lotBoms', b.id) : undefined,
+            });
+            lots.add(b.lot);
+          }
+        }
+      }
+      const count = s => rows.filter(r => r.status === s).length;
+      const over = count('Over BOM');
+      return {
+        title: 'Lot BOM vs Actual',
+        note: 'Each lot\'s BOM (Production → Lot BOM) beside what its entries really used. As per BOM = qty per kg × the kg that went through the stage: grey fabric knitted for yarn, fabric taken into dyeing or finishing for dyes, chemicals and packing. Within 2% counts as as per BOM.' + (canOpen ? ' Click a line to open the lot\'s BOM.' : ''),
+        cards: [{ label: 'Lots with a BOM', value: lots.size, type: 'int' }, { label: 'Materials over the BOM', value: over, type: 'int', sub: over ? 'used more than planned' : '' },
+          { label: 'Under the BOM or not used', value: count('Under BOM') + count('Not used'), type: 'int' }, { label: 'Cost of materials used', value: r2(rows.reduce((a, r) => a + r.cost, 0)), type: 'money' }],
+        tables: [{
+          title: 'Materials by lot and stage', chip: lots.size + (lots.size === 1 ? ' lot' : ' lots') + ' · ' + rows.length + (rows.length === 1 ? ' material' : ' materials'), pdf: 'Download PDF',
+          columns: [Object.assign(C('lot', 'Lot'), { sub: 'lotSub' }), Object.assign(C('stage', 'Used in'), { sub: 'stageSub' }), Object.assign(C('item', 'Material'), { sub: 'itemSub', wrap: true }),
+            Object.assign(C('want', 'As per BOM', 'qty'), { dash: true }), Object.assign(C('got', 'Used', 'qty'), { dash: true }),
+            Object.assign(C('diff', 'Difference', 'qty'), { dash: true }), Object.assign(C('pct', 'Diff %', 'pct'), { dash: true }), C('status', 'Status', 'flag'), Object.assign(C('cost', 'Cost used (₹)', 'money', true), { dash: true })],
+          rows,
+        }],
+      };
+    },
+
     purchase() {
       const rows = data.purchaseBills.filter(d => inRange(d.date, q) && (!q.party || d.party === q.party)).sort(byDate).map(d => ({
         date: d.date, no: d.no, billNo: d.billNo || '', party: pName(d.party), goods: num(d.goodsValue !== undefined ? d.goodsValue : d.taxable), charges: r2(num(d.freight) + num(d.otherCharges) - num(d.discount)), taxable: num(d.taxable), cgst: num(d.cgst), sgst: num(d.sgst), igst: num(d.igst), roundOff: num(d.roundOff), total: num(d.total), _link: link('purchaseBills', d.id),
@@ -1177,6 +1377,98 @@ function buildReports(ctx) {
           { title: 'Sales register', columns: [C('date', 'Date', 'date'), C('no', 'Invoice No'), C('party', 'Customer'), C('gstin', 'GSTIN'), C('pos', 'Place of supply'), C('qty', 'Qty Kg', 'qty', true), C('goods', 'Goods', 'money', true), C('charges', 'Freight/Other', 'money', true), C('taxable', 'Taxable', 'money', true), C('cgst', 'CGST', 'money', true), C('sgst', 'SGST', 'money', true), C('igst', 'IGST', 'money', true), C('roundOff', 'Round off', 'money', true), C('total', 'Total', 'money', true)], rows },
           { title: 'Item-wise sales', columns: [C('item', 'Item'), C('qty', 'Qty Kg', 'qty', true), C('rolls', 'Rolls', 'int', true), C('rate', 'Avg Rate', 'money'), C('amount', 'Taxable Value', 'money', true)], rows: itemRows },
         ],
+      };
+    },
+
+    // Every sale bill with what went out (kg, rolls and lots), its salesman, and the money that settled it
+    // with the ways it was paid. Money counts once it is there: a cheque once it is cashed.
+    dispatchLog() {
+      const bs = billStatus(data), deliv = index(data.deliveries);
+      const inv = data.invoices.filter(d => inRange(d.date, q) && (!q.party || d.party === q.party) && salesmanIs(salesmanOf(d))).sort(byDate);
+      const waiting = new Set(data.receipts.filter(r => r.invoiceId && whenCounts(r).pending > 0).map(r => r.invoiceId));
+      let kg = 0, rolls = 0;
+      const rows = inv.map(d => {
+        const src = d.challanId && deliv[d.challanId] ? d.challanId : d.id, lots = new Map();
+        let k = 0, n = 0;
+        (d.lines || []).forEach((l, i) => {
+          const lr = num(l.rolls) || R.saleRolls[src + '|' + i] || 0, key = l.item + '|' + (l.lot || '');
+          const e = lots.get(key) || { item: l.item, lot: l.lot || '', kg: 0, rolls: 0 };
+          e.kg += num(l.qty); e.rolls += lr; lots.set(key, e); k += num(l.qty); n += lr;
+        });
+        kg += k; rolls += n;
+        const b = bs[d.id] || { paid: 0, due: num(d.total), status: 'Unpaid', modes: [] };
+        const tags = (b.modes || []).concat(waiting.has(d.id) ? ['Cheque not cashed'] : [], b.due >= 0.5 ? [b.status] : []);
+        return {
+          no: d.no, date: dmy(d.date), party: pName(d.party), city: (parties[d.party] || {}).city || '', salesman: smName(salesmanOf(d)),
+          lots: [...lots.values()].map(e => ({ t: iName(e.item), sub: [e.lot && 'Lot ' + e.lot, r3(e.kg) + ' kg', e.rolls && Math.round(e.rolls) + ' rolls'].filter(Boolean).join(' · ') })),
+          kg: r3(k), rolls: Math.round(n), total: num(d.total), paid: b.paid, modes: tags, _link: link('invoices', d.id),
+        };
+      });
+      return {
+        title: 'Sale Bills & Dispatch Log' + rangeText(),
+        note: 'Every sale bill with the fabric and lots sent, kg and rolls, the salesman, and the money received against it. Money counts once it is there: a cheque once it is cashed. Click a bill to open it.',
+        tables: [{
+          title: 'Sale bills & outward dispatch (kg + rolls)', note: 'Fabric sold, kg dispatched, roll count, salesman and payment received',
+          chip: rows.length + (rows.length === 1 ? ' invoice' : ' invoices') + ' · ' + r3(kg).toLocaleString('en-IN') + ' kg · ' + Math.round(rolls).toLocaleString('en-IN') + ' rolls',
+          pdf: 'Download sales PDF', totalLabel: 'Total sale bills',
+          columns: [Object.assign(C('no', 'Invoice & date'), { sub: 'date' }), Object.assign(C('party', 'Customer & city'), { sub: 'city' }), C('salesman', 'Salesman'), C('lots', 'Fabric & lot details', 'lines'),
+            C('kg', 'Billed weight (kg)', 'qty', true), Object.assign(C('rolls', 'Rolls', 'int', true), { tone: 'info' }), Object.assign(C('total', 'Bill value', 'money', true), { tone: 'strong' }),
+            Object.assign(C('paid', 'Collected', 'money', true), { tone: 'ok', dash: true }), C('modes', 'Payment', 'tags')],
+          rows,
+        }],
+      };
+    },
+
+    // Money collected by each salesman in the period, by way of paying, with the kg and rolls they billed and
+    // what their customers still owe. Money counts on the day it is there: a cheque on the day it is cashed.
+    collections() {
+      const asOn = q.to || today();
+      const MODE_COL = { Cash: 'cash', UPI: 'upi', [CARD_MODE]: 'card', 'Bank Transfer': 'bank', Cheque: 'cheque', 'Online Payment': 'online' };
+      const m = new Map();
+      const get = id => m.get(id) || m.set(id, { id, cash: 0, upi: 0, card: 0, bank: 0, cheque: 0, online: 0, other: 0, total: 0, kg: 0, rolls: 0, due: 0, waiting: 0 }).get(id);
+      for (const s of data.salesmen || []) if (!s.inactive && salesmanIs(s.id)) get(s.id);
+      for (const r of data.receipts) {
+        const sm = salesmanOf(r);
+        if (!salesmanIs(sm)) continue;
+        for (const c of countedParts(r)) if (inRange(c.date, q)) { const e = get(sm); e[MODE_COL[c.mode] || 'other'] += c.amount; e.total += c.amount; }
+        const w = whenCounts(r);
+        if (w.pending && inRange(r.date, q)) get(sm).waiting += w.pending; // cheques received in the period, not cashed yet
+      }
+      const deliv = index(data.deliveries);
+      for (const d of data.invoices) {
+        const sm = salesmanOf(d);
+        if (!inRange(d.date, q) || !salesmanIs(sm)) continue;
+        const e = get(sm), src = d.challanId && deliv[d.challanId] ? d.challanId : d.id;
+        (d.lines || []).forEach((l, i) => { e.kg += num(l.qty); e.rolls += num(l.rolls) || R.saleRolls[src + '|' + i] || 0; });
+      }
+      // what each salesman's customers owe at the end of the period
+      const bal = {};
+      for (const t of partyTxns(data)) if ((t.date || '') <= asOn) bal[t.party] = (bal[t.party] || 0) + t.dr - t.cr;
+      for (const p of data.parties) if (partyIs(p, 'Customer') && bal[p.id] > 0.5 && salesmanIs(p.salesman || '')) get(p.salesman || '').due += bal[p.id];
+      const money = (k, label, extra) => Object.assign(C(k, label, 'money', true), { dash: true }, extra || {});
+      const billed = (kg, rolls) => kg ? r3(kg).toLocaleString('en-IN') + ' kg (' + Math.round(rolls) + ' rolls)' : '–';
+      const list = [...m.values()].filter(e => e.id || e.total || e.kg || e.due || e.waiting);
+      const rows = list.map(e => {
+        const s = salesmen[e.id];
+        const o = { name: s ? s.name : 'No salesman', sub: s ? [s.area, s.phone].filter(Boolean).join(' · ') : 'Customers and bills without a salesman',
+          _link: '#/report/dispatchLog' + qsOf({ from: q.from, to: q.to, salesman: e.id || 'none' }) };
+        for (const k of ['cash', 'upi', 'card', 'bank', 'cheque', 'online', 'other', 'total', 'due', 'waiting']) o[k] = r2(e[k]);
+        return Object.assign(o, { kg: r3(e.kg), rolls: Math.round(e.rolls), billed: billed(e.kg, e.rolls) });
+      }).sort((a, b) => (a.name === 'No salesman') - (b.name === 'No salesman') || a.name.localeCompare(b.name));
+      const n = list.filter(e => e.id).length;
+      return {
+        title: 'Salesman-wise Collections' + rangeText(),
+        note: 'Money received from customers in the period, by salesman and way of paying. A cheque counts on the day it is cashed. A bill or receipt without a salesman goes to its customer\'s salesman. Outstanding: what each salesman\'s customers owe as on ' + dmy(asOn) + '. Click a salesman for their sale bills.',
+        tables: [{
+          title: 'Collections by payment mode', note: 'Cash, UPI, card machine (EDC / POS), bank transfer and cheque collected by each salesman',
+          chip: n + (n === 1 ? ' salesman' : ' salesmen'), pdf: 'Download collections PDF', totalLabel: 'Total all salesmen',
+          totals: { billed: billed(rows.reduce((t, r) => t + r.kg, 0), rows.reduce((t, r) => t + r.rolls, 0)) },
+          columns: [Object.assign(C('name', 'Salesman & area'), { sub: 'sub', wrap: true }), money('cash', 'Cash'), money('upi', 'UPI'), money('card', 'Card (EDC / POS)'), money('bank', 'RTGS / NEFT'), money('cheque', 'Cheque')]
+            .concat(rows.some(r => r.online) ? [money('online', 'Online')] : [], rows.some(r => r.other) ? [money('other', 'Other')] : [],
+              [money('total', 'Total collected', { tone: 'strong' }), Object.assign(C('billed', 'Billed qty (kg / rolls)'), { align: 'num' }), money('due', 'Area outstanding', { tone: 'bad' })],
+              rows.some(r => r.waiting) ? [money('waiting', 'Cheques not cashed', { tone: 'warn' })] : []),
+          rows,
+        }],
       };
     },
 
@@ -1300,7 +1592,7 @@ function buildReports(ctx) {
       return {
         title: 'Stock Exceptions',
         columns: [C('date', 'Date', 'date'), C('doc', 'Document'), C('item', 'Item'), C('location', 'Location'), C('lot', 'Lot'), C('short', 'Short Qty', 'qty')],
-        rows: R.errors.map(e => ({ date: e.date, doc: docName(e.col) + ' ' + (e.docNo || ''), item: iName(e.item), location: lName(e.loc), lot: e.lot + (e.roll ? ' (roll ' + e.roll + ')' : ''), short: e.short, _link: link(e.col, e.docId) })),
+        rows: R.errors.map(e => ({ date: e.date, doc: (docName(e.col) + ' ' + (e.docNo || '')).trim(), item: iName(e.item), location: lName(e.loc), lot: e.lot + (e.roll ? ' (roll ' + e.roll + ')' : ''), short: e.short, _link: link(e.col, e.docId) })),
       };
     },
 
@@ -1374,11 +1666,14 @@ function buildReports(ctx) {
       const lot = String(q.lot || '').trim().replace(/\s+/g, ' ').toUpperCase();
       const next = lotMaker(data, q.date)();
       const has = (d, up) => [d.lotNo, d.outLot].concat((d.lines || []).map(l => l.lot)).some(v => v && (up ? String(v).toUpperCase() : v) === lot);
-      if (q.self && STOCK_COLS.some(c => (data[c] || []).some(d => d.id === q.self && has(d, true)))) return { lot, ok: true, own: true, next };
+      const docs = stockDocs(data);
+      if (q.self && docs.some(([, d]) => d.id === q.self && has(d, true))) return { lot, ok: true, own: true, next };
       if (!LOT_OK.test(lot)) return { lot, ok: false, problem: 'format', next };
       // name the entry that gave the lot first (GRN, opening stock), then any other
-      for (const c of ['grn', 'stockAdjust'].concat(STOCK_COLS.filter(x => x !== 'grn' && x !== 'stockAdjust'))) for (const d of data[c] || []) {
+      const first = { grn: 0, stockAdjust: 1, items: 2 };
+      for (const [c, d] of docs.sort((a, b) => (a[0] in first ? first[a[0]] : 3) - (b[0] in first ? first[b[0]] : 3))) {
         if (d.id === q.self || !has(d, true)) continue;
+        if (c === 'items') return { lot, ok: false, problem: 'used', usedIn: docLabel(c, d), next };
         const l = (d.lines || []).find(x => String(x.lot || '').toUpperCase() === lot);
         const item = l ? l.item : d.outItem || d.inItem;
         return { lot, ok: false, problem: 'used', usedIn: (c === 'grn' ? '' : (DOC_LABELS[c] || c) + ' ') + (d.no || '') + (item ? ', ' + iName(item) : ''), next };
@@ -1450,7 +1745,7 @@ function buildReports(ctx) {
         m.set(r.item, e);
         const net = r.qin - r.qout;
         if (storeSide(r.loc)) e.store += net; else e.away += net;
-        if (q.from && r.date < q.from) { e.open += net; continue; }
+        if ((q.from && r.date < q.from) || r.col === 'items') { e.open += net; continue; } // the item's own opening stock is always opening
         if (r.col === 'grn' || (r.col === 'stockAdjust' && net > 0)) e.recd += net;
         else if (r.col === 'transfers') { if (r.qin > 0) { if (storeSide(r.loc)) e.back += r.qin; else e.sent += r.qin; } }
         else if (['knitting', 'dyeing', 'finishing'].includes(r.col)) { if (r.qout > 0) e.used += r.qout; else e.made += r.qin; }
@@ -1514,6 +1809,48 @@ function buildReports(ctx) {
           C('back', 'Kg Worked', 'qty', true), C('pending', 'Kg Still There', 'qty', true), C('expected', 'Expected By', 'date'), C('status', 'Status', 'flag')],
         rows: sends.reverse().map(s => ({ date: s.date, doc: s.no, kind: s.kind, agency: lName(s.agency), item: iName(s.item), lot: s.lot, color: s.color, qty: r3(s.qty), rolls: s.rolls || '', back: s.back, pending: s.pending, expected: s.expected, status: s.status, _link: link(s.col, s.id) })),
       };
+    },
+
+    // Yarn given to the knitting agencies and the grey fabric they delivered against it, in parts.
+    knitDeliveries() {
+      const pct = (w, y) => y ? r2(w / y * 100) : 0;
+      const kg = v => r3(v).toLocaleString('en-IN');
+      const list = knitProgress().filter(e => (!q.location || e.loc === q.location) && (!q.lot || e.lot.toLowerCase().includes(q.lot.toLowerCase())) && (q.all || e.status !== 'Completed'))
+        .sort((a, b) => (b.first || '').localeCompare(a.first || '') || b.lot.localeCompare(a.lot, undefined, { numeric: true }));
+      const rows = list.map(e => ({
+        lot: e.lot || '(no lot)', lotSub: [...e.items].map(iName).join(', '), agency: lName(e.loc), given: r3(e.given), givenSub: e.first ? 'from ' + dmy(e.first) : '',
+        deliveries: e.deliveries.map(x => ({ t: dmy(x.date) + ' · ' + x.no + ': ' + kg(x.grey) + ' kg grey' + (x.last ? ' (last)' : ''),
+          sub: 'from ' + kg(x.yarn) + ' kg yarn · wastage ' + kg(x.waste) + ' kg = ' + pct(x.waste, x.yarn).toFixed(2) + '%' })),
+        grey: e.grey, greySub: e.deliveries.length ? 'from ' + kg(e.yarn) + ' kg yarn' : '', yarn: e.yarn, waste: e.waste, pct: e.deliveries.length ? pct(e.waste, e.yarn) : '',
+        returned: e.returned, left: e.left, status: e.status,
+      }));
+      const tot = k => r3(list.reduce((a, e) => a + e[k], 0));
+      const open = list.filter(e => e.status !== 'Completed');
+      return {
+        title: 'Knitting Deliveries',
+        note: 'Yarn given to each knitting agency, lot by lot, and the grey fabric it delivered against it, one delivery at a time (300 kg, then 400 kg ...). Wastage of each delivery and in all, in kg and as % of the yarn used. The last delivery uses up the yarn still there. Tick "Include completed" for lots fully delivered.',
+        cards: [{ label: 'Yarn given', value: tot('given'), type: 'qty' }, { label: 'Grey received', value: tot('grey'), type: 'qty', sub: open.length + ' lot' + (open.length === 1 ? '' : 's') + ' still being knitted' },
+          { label: 'Wastage', value: tot('waste'), type: 'qty', sub: pct(tot('waste'), tot('yarn')).toFixed(2) + '% of the yarn used' }, { label: 'Yarn still at agencies', value: tot('left'), type: 'qty' }],
+        tables: [{
+          title: 'Yarn given and grey received', chip: list.length + (list.length === 1 ? ' lot' : ' lots') + ' · ' + list.reduce((a, e) => a + e.deliveries.length, 0) + ' deliveries', pdf: 'Download PDF',
+          totals: { pct: pct(tot('waste'), tot('yarn')).toFixed(2) + '%' },
+          columns: [Object.assign(C('lot', 'Lot'), { sub: 'lotSub' }), C('agency', 'Agency'), Object.assign(C('given', 'Yarn given (kg)', 'qty', true), { sub: 'givenSub' }),
+            C('deliveries', 'Grey received, delivery by delivery', 'lines'), Object.assign(C('grey', 'Grey received (kg)', 'qty', true), { sub: 'greySub', tone: 'strong' }),
+            Object.assign(C('waste', 'Wastage (kg)', 'qty', true), { dash: true }), Object.assign(C('pct', 'Wastage %', 'pct'), { dash: true })]
+            .concat(rows.some(r => r.returned) ? [Object.assign(C('returned', 'Yarn sent back (kg)', 'qty', true), { dash: true })] : [],
+              [Object.assign(C('left', 'Yarn still there (kg)', 'qty', true), { dash: true, tone: 'warn' }), C('status', 'Status', 'flag')]),
+          rows,
+        }],
+      };
+    },
+
+    // For a knitting entry (open to every login): the yarn lot at that agency, given and delivered so far.
+    knitLot() {
+      const e = knitProgress().find(x => x.loc === q.location && x.lot === (q.lot || ''));
+      if (!e) return { given: 0, deliveries: 0, grey: 0, yarn: 0, waste: 0, expectedPct: null };
+      const ds = e.deliveries.filter(x => x.id !== q.self);
+      const sum = k => r3(ds.reduce((a, x) => a + x[k], 0));
+      return { given: r3(e.given), deliveries: ds.length, grey: sum('grey'), yarn: sum('yarn'), waste: sum('waste'), returned: e.returned, expectedPct: e.expectedPct };
     },
 
     // Lots of grey and dyed fabric at the agencies with their processing status, plus lots received back.
@@ -2300,7 +2637,7 @@ function reportImpl(name, data, q, version, perms) {
     pName: id => parties[id] ? parties[id].name : (id || ''),
     lName: id => locs[id] ? locs[id].name : (id || ''),
     link: (col, id) => '#/edit/' + col + '/' + id,
-    docName: col => DOC_LABELS[col] || col,
+    docName: col => col === 'items' ? 'Opening stock' : DOC_LABELS[col] || col,
     stockRows: asOn => {
       const m = new Map();
       for (const r of R.ledger) {
@@ -2325,4 +2662,4 @@ function reportImpl(name, data, q, version, perms) {
   return reports[name]();
 }
 
-module.exports = { compute, computed, report: reportImpl, prepare, validate, partyBalances, agencyParty, cashTxns, billStatus, salaryCalc, loanState, STOCK_COLS, DOC_LABELS, BUCKETS, vsum };
+module.exports = { compute, computed, report: reportImpl, prepare, validate, partyBalances, agencyParty, cashTxns, billStatus, salaryCalc, loanState, STOCK_COLS, OPENING_KEYS, DOC_LABELS, BUCKETS, vsum };

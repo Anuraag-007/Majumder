@@ -8,7 +8,7 @@
     "start": "node server.js",
     "demo": "node server/seed.js --demo",
     "backup": "node server/backup.js",
-    "test": "node tests/storage.js && node tests/api.js && node tests/sessions.js && node tests/e2e.js"
+    "test": "node tests/storage.js && node tests/api.js && node tests/sessions.js && node tests/support.js && node tests/e2e.js"
   },
   "engines": {
     "node": ">=22.13"
