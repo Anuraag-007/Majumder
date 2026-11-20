@@ -609,7 +609,7 @@ const SCHEMAS = {
   purchaseOrders: {
     title: 'Purchase Orders', singular: 'Purchase Order', col: 'purchaseOrders', printTitle: 'PURCHASE ORDER',
     layout: [
-      { fields: [F.no, F.date, F.party('Supplier', { list: true }), { k: 'deliveryDate', label: 'Delivery by', type: 'date' }, { k: 'status', label: 'Status', type: 'select', options: ['Open', 'Closed', 'Cancelled'], def: 'Open', list: true }] },
+      { fields: [F.no, F.date, F.party('Supplier', { list: true, filter: p => p.type === 'Supplier' || p.type === 'Both' }), { k: 'deliveryDate', label: 'Delivery by', type: 'date' }, { k: 'status', label: 'Status', type: 'select', options: ['Open', 'Closed', 'Cancelled'], def: 'Open', list: true }] },
       { grid: { k: 'lines', title: 'Items', cols: [C.item(S.RAW_CATEGORIES, { onChange: fillPurchaseLine }), C.qty(), C.unit, C.rate, C.gst, C.amount] } },
       { fields: [{ k: 'freight', label: 'Freight (₹)', type: 'number', fmt: 'money' }, { k: 'terms', label: 'Terms', type: 'textarea', w: 3 }] },
       { totals: true },
@@ -623,7 +623,7 @@ const SCHEMAS = {
     beforeSave: lotsChecked(r => !!String(r.lot || '').trim()), savedNote: lotsSaved,
     layout: [
       { fields: [
-        F.no, F.date, F.party('Supplier'),
+        F.no, F.date, F.party('Supplier', { filter: p => p.type === 'Supplier' || p.type === 'Both' }),
         { k: 'poId', label: 'Against PO', type: 'ref', ref: 'purchaseOrders', filter: (r, d) => r.party === d.party && r.status !== 'Cancelled',
           help: 'Loads pending PO quantities',
           onChange: (d) => { const po = byId('purchaseOrders', d.poId); if (po) d.lines = pendingFrom(po, 'grn', 'poId', d.id).map(l => ({ item: l.item, lot: '', qty: l.qty, rate: l.rate })); } },
@@ -640,7 +640,7 @@ const SCHEMAS = {
     title: 'Purchase Bills', singular: 'Purchase Bill', col: 'purchaseBills', printTitle: 'PURCHASE BILL',
     layout: [
       { fields: [
-        F.no, F.date, F.party('Supplier'),
+        F.no, F.date, F.party('Supplier', { filter: p => p.type === 'Supplier' || p.type === 'Both' }),
         { k: 'billNo', label: 'Supplier bill no', type: 'text', req: true, list: true },
         { k: 'billDate', label: 'Bill date', type: 'date', def: () => U.today() },
         { k: '_info', label: 'Payment status', type: 'calc', w: 2, value: d => d._infoText || '', show: d => !!d.id },
