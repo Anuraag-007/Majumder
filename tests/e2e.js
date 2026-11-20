@@ -407,12 +407,12 @@ async function run() {
     if (lot !== 'L-0001' || yl !== 'L-0001' || r0 !== '8' || rate !== '9') throw new Error('lot no "' + lot + '", yarn lot ' + yl + ', rate ' + r0 + ' then ' + rate);
     return 'process rate ' + r0 + ' → agency rate ' + rate;
   });
-  await step('600 kg yarn → 585 kg grey; wastage (15 kg) and job charges (₹5,265) fill in; grey sent to Bengal Dyeing House', async () => {
+  await step('600 kg yarn used → 585 kg grey; job charges (₹5,265) fill in; no wastage; grey sent to Bengal Dyeing House', async () => {
     await grid(0, 0, 'Item', 'Y30'); await grid(0, 0, 'Yarn lot', 'L-0001'); await grid(0, 0, 'Qty', 600);
     const lot = await get('Lot no'); if (lot !== 'L-0001') throw new Error('lot no shows ' + lot + ', not the yarn lot');
     await fill('Grey fabric produced', 'GSJ'); await fill('Output qty (kg)', 585); await fill('Rolls', 25); await fill('GSM', 160);
-    const w = await get('Wastage qty (kg)'), l = await get('Job charges (₹)');
-    if (w !== '15' || l !== '5265') throw new Error('wastage ' + w + ', charges ' + l);
+    const l = await get('Job charges (₹)');
+    if (l !== '5265') throw new Error('charges ' + l);
     await fill('Grey fabric sent to', 'Bengal Dyeing House');
     await shot('06-knitting');
     return save();
@@ -638,7 +638,7 @@ async function run() {
   await step('finishing charges ₹3,360, packing ₹120 and overhead ₹11,200 reach the lot in full', () => near(row.finLabour, 3360) && near(row.packing, 120) && near(row.overhead, 11200));
   await step('all job charges (₹17,400) are accounted for: in the lot or in its wastage cost', () => row.knitLabour + row.dyeLabour + row.finLabour < 17400 && row.knitLabour + row.dyeLabour + row.finLabour > 17400 * 0.95);
   await step('wastage cost is part of the total, not added twice', () => near(row.yarn + row.dyes + row.packing + row.knitLabour + row.dyeLabour + row.finLabour + row.overhead + row.wastage, TOTAL));
-  await step('wastage report: 15 + 15 + 10 kg across the three stages', async () => { const w = await api('/api/report/wastage'); const s = w.tables[0].rows; return s.length === 3 && s.reduce((a, r) => a + r.qty, 0) === 40; });
+  await step('wastage report: 15 + 10 kg across dyeing and finishing (knitting has no wastage)', async () => { const w = await api('/api/report/wastage'); const s = w.tables[0].rows; return s.reduce((a, r) => a + r.qty, 0) === 25; });
   await step('lot tracking: L-0001 from the GRN (Shree Mills, 1000 kg) — yarn 600 → FG 560 (yield 93.33%), 400 kg sold, 160 kg in stock', async () => {
     const l = (await api('/api/report/lots')).rows.find(r => r.lot === 'L-0001');
     return l && /Shree Mills/.test(l.supplier) && l.recdQty === 1000 && l.yarnIn === 600 && l.fgOut === 560 && l.yieldPct === 93.33 && l.sold === 400 && l.inStock === 160 ? l.status : false;
@@ -931,36 +931,37 @@ async function run() {
     await go('#/dashboard');
     return 'receipt salesman "' + sm + '", card ₹' + card + ' (' + rc.card + ', approval ' + rc.refNo + '); dispatch log: ' + chip + ', first lot "' + lot + '"';
   });
-  await step('knitting delivered in parts: 200 kg of lot OLD/40 given; 60 kg grey (2.5% expected), 80 kg (3% typed), then the last 52 kg uses up the rest; Knitting Deliveries adds it up', async () => {
+  await step('knitting delivered in parts: 200 kg of lot OLD/40 given; 60 kg grey, 80 kg, then the last 52 kg uses up the rest of the yarn; no wastage; Knitting Deliveries adds it up', async () => {
     await openNew('yarnIssue'); await fill('Knitting agency', 'Maa Tara Knitting');
     await grid(0, 0, 'Item', 'Y40'); await grid(0, 0, 'Yarn lot', 'OLD/40'); await grid(0, 0, 'Qty', 200);
     if (await get('Expected grey fabric (kg)') !== '195') throw new Error('expected grey ' + await get('Expected grey fabric (kg)'));
     await save();
-    const part = async (grey, more) => {
+    const part = async (grey, last) => {
       await openNew('knitting'); await fill('Agency / unit', 'Maa Tara Knitting');
       const lot = await grid(0, 0, 'Yarn lot');
       if (!(await waitFor(`T.get('This yarn lot at the agency').includes('OLD/40: 200 kg of yarn given')`))) throw new Error('no yarn lot line: ' + await get('This yarn lot at the agency'));
       const info = await get('This yarn lot at the agency');
       await fill('Grey fabric produced', 'GSJ'); await fill('Output qty (kg)', grey);
-      if (more) await more();
-      const r = { lot, info, yarn: await grid(0, 0, 'Qty'), kg: await get('Wastage qty (kg)'), pct: await get('Wastage %') };
+      if (last) { await tick('Last delivery'); await sleep(200); }
+      const r = { lot, info, yarn: await grid(0, 0, 'Qty') };
       await fill('Grey fabric sent to', 'Maa Tara Knitting');
       await save();
       return r;
     };
     const a = await part(60);
-    const b = await part(80, () => fill('Wastage %', 3));
-    const c = await part(52, async () => { await tick('Last delivery'); await sleep(200); });
-    const want = [['OLD/40', 'no delivery yet', '61.538', '1.538', '2.5'], ['OLD/40', '1 delivery before this: 60 kg grey from 61.538 kg yarn, wastage 1.538 kg (2.50%)', '82.474', '2.474', '3'],
-      ['OLD/40', '2 deliveries before this: 140 kg grey from 144.012 kg yarn, wastage 4.012 kg (2.79%)', '55.988', '3.988', '7.12']];
-    [a, b, c].forEach((x, i) => { const w = want[i]; if (x.lot !== w[0] || !x.info.includes(w[1]) || x.yarn !== w[2] || x.kg !== w[3] || x.pct !== w[4]) throw new Error('delivery ' + (i + 1) + ': ' + JSON.stringify(x)); });
+    const b = await part(80);
+    const c = await part(52, true);
+    const want = [['OLD/40', 'no delivery yet', '60'],
+      ['OLD/40', '1 delivery before this: 60 kg grey from 60 kg yarn used', '80'],
+      ['OLD/40', '2 deliveries before this: 140 kg grey from 140 kg yarn used', '60']];
+    [a, b, c].forEach((x, i) => { const w = want[i]; if (x.lot !== w[0] || !x.info.includes(w[1]) || x.yarn !== w[2]) throw new Error('delivery ' + (i + 1) + ': ' + JSON.stringify(x)); });
     await go('#/report/knitDeliveries?lot=OLD%2F40&all=1');
     if (!(await waitFor(`!!document.querySelector('.view table.report tbody tr .cell-lines')`))) throw new Error('report did not load');
     const row = await ev(`(() => { const t = document.querySelector('.view table.report'); const h = [...t.querySelectorAll('thead th')].map(x => x.textContent); const r = t.querySelector('tbody tr');
-      const at = k => r.cells[h.indexOf(k)].textContent; return { given: at('Yarn given (kg)'), grey: at('Grey received (kg)'), waste: at('Wastage (kg)'), pct: at('Wastage %'), left: at('Yarn still there (kg)'), status: at('Status'), n: r.querySelectorAll('.cell-lines > div').length }; })()`);
+      const at = k => r.cells[h.indexOf(k)].textContent; return { given: at('Yarn given (kg)'), grey: at('Grey received (kg)'), left: at('Yarn still there (kg)'), status: at('Status'), n: r.querySelectorAll('.cell-lines > div').length }; })()`);
     await shot('12b-knitting-deliveries');
-    if (!/^200from \d{2}-\d{2}-\d{4}$/.test(row.given) || !/^192from 200 kg yarn$/.test(row.grey) || row.waste !== '8' || row.pct !== '4.00%' || row.left !== '–' || row.status !== 'Completed' || row.n !== 3) throw new Error(JSON.stringify(row));
-    return 'yarn ' + [a, b, c].map(x => x.yarn + ' kg (wastage ' + x.kg + ' kg = ' + x.pct + '%)').join(', ') + '; report: 192 kg grey from 200 kg, wastage 8 kg = 4.00%, completed';
+    if (!/^200from \d{2}-\d{2}-\d{4}$/.test(row.given) || !/^192from 200 kg yarn$/.test(row.grey) || row.status !== 'Completed' || row.n !== 3) throw new Error(JSON.stringify(row));
+    return 'yarn used ' + [a, b, c].map(x => x.yarn + ' kg').join(', ') + '; report: 192 kg grey from 200 kg yarn, completed, no wastage';
   });
   await step('activity log shows who did what', async () => {
     await go('#/report/activity');

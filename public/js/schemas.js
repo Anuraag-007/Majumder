@@ -296,6 +296,8 @@ function productionRecalc(stage) {
       // Dyeing is outsourced and delivered in parts: the grey this delivery used = dyed output + wastage (set
       // in dyeInput). The rest of the lot stays at the agency as pending stock, never wastage. Keep % with kg.
       if (!doc._wpTyped) doc._wp = inQ && doc.wastageQty !== '' && doc.wastageQty !== undefined ? S.r2(S.num(doc.wastageQty) / inQ * 100) : '';
+    } else if (stage === 'Knitting') {
+      doc.wastageQty = 0; doc._wp = ''; // knitting has no wastage: the unused yarn stays pending with the agency
     } else {
       if (doc._wpTyped) doc.wastageQty = S.r3(inQ * S.num(doc._wp) / 100);
       else if (!doc._wastageQtyTouched && outQ > 0) doc.wastageQty = S.r3(Math.max(0, inQ - outQ));
@@ -307,17 +309,16 @@ function productionRecalc(stage) {
     if (b) for (const l of doc.lines || []) { const bl = (b.lines || []).find(x => x.item === l.item); if (bl) l.qty = S.r3(S.num(bl.qtyPerKg) * inQ); }
   };
 }
-/* Knitting delivered in parts: 1,000 kg of yarn given, then 300 kg of grey back, 400 kg ... The grey received
-   works out the yarn it used: until a yarn qty is typed, the (one) yarn line takes grey + wastage, the wastage
-   typed in kg or in % of the yarn (at first the loss expected on the yarn issue, e.g. 2.5%). "Last delivery"
-   takes all the yarn of each lot still at the agency: what did not become fabric is wastage. */
+/* Knitting delivered in parts: e.g. 526 kg of yarn given, grey back in parts. Knitting has NO wastage -- the
+   yarn used for a delivery defaults to the grey received (type the actual yarn used to override), and the rest
+   of the issued yarn stays with the agency as pending, to come back as more grey. "Last delivery" uses up
+   whatever yarn of each lot is still at the agency. */
 function knitYarn(doc, ctx) {
   const lines = (doc.lines || []).filter(l => l.item);
   if (doc.lastDelivery) { if (ctx && ctx.available) for (const l of lines) l.qty = S.r3(ctx.available(doc.location, l.item, l.lot)); return; }
   const outQ = S.num(doc.outQty);
   if (lines.length !== 1 || doc._yarnTouched || doc.id || !(outQ > 0)) return;
-  const wp = Math.min(90, Math.max(0, S.num(doc._wpTyped ? doc._wp : doc._wpDefault)));
-  lines[0].qty = S.r3(doc._wastageQtyTouched ? outQ + S.num(doc.wastageQty) : outQ / (1 - wp / 100));
+  lines[0].qty = S.r3(outQ);
 }
 /* Dyeing is done by outside agencies and delivered in parts: a 500 kg grey lot may come back 200 kg now, 300 kg
    later. Each entry is one delivery -- the dyed fabric that came (output) and the wastage (kg or %, 0 by default).
@@ -342,11 +343,10 @@ async function knitInfo(doc) {
   doc._knitKey = (doc.location || '') + '|' + lot;
   if (!doc.location || !lot) return '';
   const r = await API.report('knitLot', { location: doc.location, lot, self: doc.id || '' });
-  doc._wpDefault = r.expectedPct === null ? 0 : r.expectedPct;
   const kg = v => U.qty(v) + ' kg';
   return 'Lot ' + lot + ': ' + kg(r.given) + ' of yarn given · ' + (r.deliveries
-    ? r.deliveries + (r.deliveries === 1 ? ' delivery' : ' deliveries') + ' before this: ' + kg(r.grey) + ' grey from ' + kg(r.yarn) + ' yarn, wastage ' + kg(r.waste) + ' (' + U.pct(r.yarn ? r.waste / r.yarn * 100 : 0) + ')'
-    : 'no delivery yet') + (r.returned ? ' · ' + kg(r.returned) + ' sent back' : '');
+    ? r.deliveries + (r.deliveries === 1 ? ' delivery' : ' deliveries') + ' before this: ' + kg(r.grey) + ' grey from ' + kg(r.yarn) + ' yarn used'
+    : 'no delivery yet') + (r.left ? ' · ' + kg(r.left) + ' yarn still with the agency' : '') + (r.returned ? ' · ' + kg(r.returned) + ' sent back' : '');
 }
 // Choosing the agency: when it holds a single lot of yarn, the yarn line fills with it.
 function knitAgency(d, ctx) {
@@ -443,15 +443,15 @@ const outputFields = (stage, outCats, extra) => [
   stage === 'Finishing' ? { k: 'rollWeights', label: 'Roll weights (kg)', type: 'text', w: 4, placeholder: 'e.g. 20.2 + 50.3 + 39.5', show: d => weighRolls() || !!String(d.rollWeights || '').trim(),
     help: 'Weigh each finished roll and type its kg with + between them. Output kg and rolls then fill in by themselves, and each roll is tracked through to the sale.' } : null,
   { k: 'outQty', label: 'Output qty (kg)', type: 'number', req: true, fmt: 'qty', onInput: d => { d._dyeTouch = true; },
-    help: stage === 'Knitting' ? 'The grey fabric delivered this time (a part is fine): the yarn it used fills in above, grey + wastage'
+    help: stage === 'Knitting' ? 'The grey fabric delivered this time (a part is fine); the yarn it used fills in above (type the actual yarn used to override)'
       : stage === 'Dyeing' ? 'The dyed fabric the agency delivered this time (a part of the lot is fine): the grey it used fills in above' : '' },
   { k: 'rolls', label: 'Rolls', type: 'number', fmt: 'int', onInput: d => { d._rollsTouched = true; },
     help: stage === 'Knitting' ? 'Count of rolls (an approximate count is fine)' : 'Filled from the rolls of the kg taken in (the lot\'s average); change it only if the count changed' },
 ].concat(extra || [], [
-  { k: '_diff', label: 'Input - output (kg)', type: 'calc', fmt: 'qty', value: d => (stage === 'Knitting' ? sumQty(d.lines) : S.num(d.inQty)) - S.num(d.outQty) },
-  { k: 'wastageQty', label: 'Wastage qty (kg)', type: 'number', fmt: 'qty', onInput: d => { d._wastageQtyTouched = true; d._wpTyped = false; d._dyeTouch = true; } },
-  { k: '_wp', label: 'Wastage %', type: 'number', onInput: d => { d._wpTyped = true; d._wastageQtyTouched = false; d._dyeTouch = true; },
-    help: 'Type the wastage in kg or in % ' + (stage === 'Knitting' ? 'of the yarn' : 'of the input') + ': the other fills in' },
+  stage === 'Knitting' ? null : { k: '_diff', label: 'Input - output (kg)', type: 'calc', fmt: 'qty', value: d => S.num(d.inQty) - S.num(d.outQty) },
+  stage === 'Knitting' ? null : { k: 'wastageQty', label: 'Wastage qty (kg)', type: 'number', fmt: 'qty', onInput: d => { d._wastageQtyTouched = true; d._wpTyped = false; d._dyeTouch = true; } },
+  stage === 'Knitting' ? null : { k: '_wp', label: 'Wastage %', type: 'number', onInput: d => { d._wpTyped = true; d._wastageQtyTouched = false; d._dyeTouch = true; },
+    help: 'Type the wastage in kg or in % of the input: the other fills in' },
   { k: 'scrapValue', label: 'Scrap sale value (₹)', type: 'number', fmt: 'money', help: 'Recovery from selling waste, if any' },
   { k: 'labourRate', label: 'Job rate (₹/kg)', type: 'number', fmt: 'money', onInput: d => { d._labourTouched = false; } },
   { k: 'labour', label: 'Job charges (₹)', type: 'number', fmt: 'money', onInput: d => { d._labourTouched = true; },
@@ -790,7 +790,7 @@ const SCHEMAS = {
       { title: 'Grey fabric received, wastage & job charges', fields: [
         { k: '_knitInfo', label: 'This yarn lot at the agency', type: 'calc', w: 4, value: d => d._infoText || (!d.location ? 'choose the agency' : !S.mainLot(d.lines) ? 'choose the yarn lot' : '') },
       ].concat(outputFields('Knitting', ['Grey Fabric'], [
-        { k: 'lastDelivery', label: 'Last delivery of this yarn lot: the yarn still at the agency is used up, and what did not become fabric is wastage', type: 'check', w: 4,
+        { k: 'lastDelivery', label: 'Last delivery of this yarn lot: whatever yarn of the lot is still at the agency is used up', type: 'check', w: 4,
           onChange: d => { d._wpTyped = false; d._wastageQtyTouched = false; } },
         { k: '_avgRoll', label: 'Average roll weight (kg)', type: 'calc', fmt: 'qty', value: d => S.num(d.rolls) ? S.num(d.outQty) / S.num(d.rolls) : '' },
         { k: '_yarnLeft', label: 'Yarn still at the agency after this (kg)', type: 'calc', fmt: 'qty',
@@ -804,8 +804,8 @@ const SCHEMAS = {
           help: 'The dyeing agency it goes to. Or keep it at the knitting agency (send it later with Send Grey for Dyeing).' }])) },
       { fields: [F.remarks] },
     ],
-    listCols: ['no', 'date', 'lotNo', 'location', { k: '_in', label: 'Yarn kg', fmt: 'qty', value: d => sumQty(d.lines) }, { k: 'outQty', label: 'Grey kg', fmt: 'qty' }, { k: 'rolls', label: 'Rolls', fmt: 'int' }, { k: 'wastageQty', label: 'Wastage kg', fmt: 'qty' },
-      { k: '_wp', label: 'Wastage %', fmt: 'pct', value: d => wastagePct(d, 'Knitting') }, { k: '_last', label: 'Last delivery', value: d => d.lastDelivery ? 'Yes' : '' }, { k: 'outLoc', label: 'Grey sent to' }],
+    listCols: ['no', 'date', 'lotNo', 'location', { k: '_in', label: 'Yarn used kg', fmt: 'qty', value: d => sumQty(d.lines) }, { k: 'outQty', label: 'Grey kg', fmt: 'qty' }, { k: 'rolls', label: 'Rolls', fmt: 'int' },
+      { k: '_last', label: 'Last delivery', value: d => d.lastDelivery ? 'Yes' : '' }, { k: 'outLoc', label: 'Grey sent to' }],
   },
   dyeing: {
     title: 'Receive Coloured Fabric (Step 2)', singular: 'Dyeing Entry', col: 'dyeing', printTitle: 'DYEING BATCH CARD',
