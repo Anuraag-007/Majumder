@@ -708,9 +708,9 @@ const SCHEMAS = {
     listCols: ['no', 'date', 'toLoc', { k: '_qty', label: 'Total kg', fmt: 'qty', value: d => sumQty(d.lines) }, 'expectedDate', 'vehicleNo', 'remarks'],
   },
   greyTransfer: {
-    title: 'Send Grey for Dyeing', singular: 'Grey Fabric Transfer', col: 'transfers', printTitle: 'GREY FABRIC TRANSFER NOTE',
+    title: 'Send Grey for Dyeing (Step 1)', singular: 'Grey Fabric Transfer', col: 'transfers', printTitle: 'GREY FABRIC TRANSFER NOTE',
     fixed: { purpose: 'Grey Transfer' }, where: d => d.purpose === 'Grey Transfer',
-    note: 'Sends grey fabric to a dyeing agency: from the knitting agency that kept it, or from the Main Store. Not needed when the knitting entry already sent the fabric straight to the dyeing agency.',
+    note: 'Step 1 of dyeing — send the grey fabric to the coloring agency, from the knitting agency that kept it or from the Main Store. The roll count from knitting fills in at the lot\'s average. (Not needed if the knitting entry already sent the grey straight to the dyeing agency.) When the coloured fabric comes back, record it in Step 2 — Receive Coloured Fabric.',
     layout: [
       { fields: [F.no, F.date,
         { k: 'fromLoc', label: 'From', type: 'ref', ref: 'locations', req: true, w: 2, list: true, filter: l => !l.inactive && l.id !== 'FG', help: 'Where the grey fabric is now', onChange: d => { for (const l of d.lines || []) l.lot = ''; } },
@@ -808,9 +808,9 @@ const SCHEMAS = {
       { k: '_wp', label: 'Wastage %', fmt: 'pct', value: d => wastagePct(d, 'Knitting') }, { k: '_last', label: 'Last delivery', value: d => d.lastDelivery ? 'Yes' : '' }, { k: 'outLoc', label: 'Grey sent to' }],
   },
   dyeing: {
-    title: 'Dyeing / Coloring', singular: 'Dyeing Entry', col: 'dyeing', printTitle: 'DYEING BATCH CARD',
+    title: 'Receive Coloured Fabric (Step 2)', singular: 'Dyeing Entry', col: 'dyeing', printTitle: 'DYEING BATCH CARD',
     fixed: { chemLoc: 'STORE' },
-    note: 'Record the dyed fabric a dyeing agency delivers — all at once or in parts (e.g. 200 kg now, 300 kg later). It takes the grey lot sent to that agency and keeps its lot number. Type the dyed output and the wastage (kg or %, 0 by default); the grey it used fills in, and the rest of the lot stays at the agency as pending. Tick "Last delivery" on the final part. Add dyes & chemicals only if you actually supply them from the Main Store (the agency usually uses its own). The job charges go to the agency\'s account.',
+    note: 'Step 2 of dyeing — receive the coloured fabric the agency delivers (the grey went to it in Step 1, Send Grey for Dyeing), all at once or in parts (e.g. 200 kg now, 300 kg later). It takes the grey lot sent to that agency and keeps its lot number. Type the dyed output and the wastage (kg or %, 0 by default); the grey it used fills in, and the rest of the lot stays at the agency as pending. Tick "Last delivery" on the final part. Add dyes & chemicals only if you actually supply them from the Main Store (the agency usually uses its own). The job charges go to the agency\'s account, and the coloured fabric then goes to finishing.',
     onNew: async doc => { const p = Cache.list('processes').find(x => x.stage === 'Dyeing'); if (p) { doc.process = p.id; doc.labourRate = S.num(p.labourRate); } },
     recalc: productionRecalc('Dyeing'),
     layout: [
@@ -1258,7 +1258,7 @@ const NAV = [
   { t: 'Masters', icon: 'db', kids: [['Items', 'items'], ['Parties', 'parties'], ['Units', 'units'], ['Locations & Godowns', 'locations'], ['Salesmen', 'salesmen'], ['Machines', 'machines'], ['Processes', 'processes'], ['BOM / Recipes', 'boms']] },
   { t: 'Purchase', icon: 'cart', kids: [['Purchase Orders', 'purchaseOrders'], ['Goods Receipt (GRN)', 'grn'], ['Purchase Bills', 'purchaseBills'], ['Supplier Payments', 'payments'], ['Pending POs', '#/report/poPending']] },
   { t: 'Inventory', icon: 'box', kids: [['Stock Summary', '#/report/stock'], ['Yarn Stock', '#/report/stockMovement?category=Yarn'], ['Godown Stock', '#/report/godownStock'], ['Stock Ledger', '#/report/stockLedger'], ['Yarn Issue to Knitting', 'yarnIssue'], ['Godown Transfer', 'godownTransfer'], ['All Transfers', 'transfers'], ['Opening / Adjustment', 'stockAdjust']] },
-  { t: 'Production', icon: 'factory', kids: [['Lot BOM', 'lotBoms'], ['Knitting', 'knitting'], ['Knitting Deliveries', '#/report/knitDeliveries'], ['Send Grey for Dyeing', 'greyTransfer'], ['Dyeing / Coloring', 'dyeing'], ['Finishing & Packing', 'finishing'], ['Processing Status', '#/report/processStatus'], ['Status Updates', 'jobStatus'], ['Job Work Register', '#/report/jobWork'], ['Agency Summary', '#/report/agencies'], ['Production Report', '#/report/production'], ['Batch / Lot Tracking', '#/report/lots'], ['Lot BOM vs Actual', '#/report/bomVsActual']] },
+  { t: 'Production', icon: 'factory', kids: [['Lot BOM', 'lotBoms'], ['Knitting', 'knitting'], ['Knitting Deliveries', '#/report/knitDeliveries'], ['1 · Send Grey for Dyeing', 'greyTransfer'], ['2 · Receive Coloured Fabric', 'dyeing'], ['Finishing & Packing', 'finishing'], ['Processing Status', '#/report/processStatus'], ['Status Updates', 'jobStatus'], ['Job Work Register', '#/report/jobWork'], ['Agency Summary', '#/report/agencies'], ['Production Report', '#/report/production'], ['Batch / Lot Tracking', '#/report/lots'], ['Lot BOM vs Actual', '#/report/bomVsActual']] },
   { t: 'Wastage', icon: 'trash', kids: [['Wastage Report', '#/report/wastage']] },
   { t: 'Costing', icon: 'calc', kids: [['Lot Costing Sheet', '#/report/costing'], ['Item-wise Costing', '#/report/itemCosting'], ['Overhead Absorption', '#/report/overheads']] },
   { t: 'Sales', icon: 'tag', kids: [['Quotations', 'quotations'], ['Sales Orders', 'salesOrders'], ['Delivery Challans', 'deliveries'], ['Invoices', 'invoices'], ['Sale Bills & Dispatch', '#/report/dispatchLog'], ['Party Price List', 'priceList'], ['Pending Orders', '#/report/soPending']] },
