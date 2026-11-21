@@ -292,17 +292,7 @@ function productionRecalc(stage) {
     if (stage === 'Dyeing') dyeInput(doc, ctx);
     const inQ = stage === 'Knitting' ? sumQty(doc.lines) : S.num(doc.inQty);
     const outQ = S.num(doc.outQty);
-    if (stage === 'Dyeing') {
-      // Dyeing is outsourced and delivered in parts: the grey this delivery used = dyed output + wastage (set
-      // in dyeInput). The rest of the lot stays at the agency as pending stock, never wastage. Keep % with kg.
-      if (!doc._wpTyped) doc._wp = inQ && doc.wastageQty !== '' && doc.wastageQty !== undefined ? S.r2(S.num(doc.wastageQty) / inQ * 100) : '';
-    } else if (stage === 'Knitting') {
-      doc.wastageQty = 0; doc._wp = ''; // knitting has no wastage: the unused yarn stays pending with the agency
-    } else {
-      if (doc._wpTyped) doc.wastageQty = S.r3(inQ * S.num(doc._wp) / 100);
-      else if (!doc._wastageQtyTouched && outQ > 0) doc.wastageQty = S.r3(Math.max(0, inQ - outQ));
-      if (!doc._wpTyped) doc._wp = inQ && doc.wastageQty !== '' && doc.wastageQty !== undefined ? S.r2(S.num(doc.wastageQty) / inQ * 100) : '';
-    }
+    doc.wastageQty = 0; doc._wp = ''; // no wastage anywhere: leftover material stays pending or is just a kg difference
     if (!doc._labourTouched) doc.labour = S.r2(S.num(doc.labourRate) * (stage === 'Dyeing' ? inQ : outQ));
     // materials filled from a recipe or from the lot's BOM follow the input kg (until typed by hand) -- finishing only
     const b = (stage === 'Dyeing' || !doc._bomAuto) ? null : doc._bomFrom === 'lot' ? lotBomOf(doc.lotNo) : doc.bom ? byId('boms', doc.bom) : null;
@@ -332,10 +322,9 @@ function dyeInput(doc, ctx) {
   let inQ;
   if (doc.lastDelivery) inQ = avail;
   else if (doc._inTouched) inQ = S.num(doc.inQty);
-  else if (doc._wpTyped) { const wp = Math.min(90, Math.max(0, S.num(doc._wp))); inQ = wp < 90 ? outQ / (1 - wp / 100) : outQ; }
-  else inQ = outQ + (doc._wastageQtyTouched ? S.num(doc.wastageQty) : 0);
+  else inQ = outQ; // grey used = dyed output; the rest of the lot stays pending, no wastage
   doc.inQty = S.r3(Math.max(0, inQ));
-  doc.wastageQty = S.r3(Math.max(0, inQ - outQ));
+  doc.wastageQty = 0;
 }
 // The yarn lot at the agency so far, for a knitting entry: given, delivered before, wastage (and the expected loss).
 async function knitInfo(doc) {
@@ -448,11 +437,7 @@ const outputFields = (stage, outCats, extra) => [
   { k: 'rolls', label: 'Rolls', type: 'number', fmt: 'int', onInput: d => { d._rollsTouched = true; },
     help: stage === 'Knitting' ? 'Count of rolls (an approximate count is fine)' : 'Filled from the rolls of the kg taken in (the lot\'s average); change it only if the count changed' },
 ].concat(extra || [], [
-  stage === 'Knitting' ? null : { k: '_diff', label: 'Input - output (kg)', type: 'calc', fmt: 'qty', value: d => S.num(d.inQty) - S.num(d.outQty) },
-  stage === 'Knitting' ? null : { k: 'wastageQty', label: 'Wastage qty (kg)', type: 'number', fmt: 'qty', onInput: d => { d._wastageQtyTouched = true; d._wpTyped = false; d._dyeTouch = true; } },
-  stage === 'Knitting' ? null : { k: '_wp', label: 'Wastage %', type: 'number', onInput: d => { d._wpTyped = true; d._wastageQtyTouched = false; d._dyeTouch = true; },
-    help: 'Type the wastage in kg or in % of the input: the other fills in' },
-  { k: 'scrapValue', label: 'Scrap sale value (₹)', type: 'number', fmt: 'money', help: 'Recovery from selling waste, if any' },
+  { k: 'scrapValue', label: 'Scrap sale value (₹)', type: 'number', fmt: 'money', help: 'Recovery from selling scrap, if any' },
   { k: 'labourRate', label: 'Job rate (₹/kg)', type: 'number', fmt: 'money', onInput: d => { d._labourTouched = false; } },
   { k: 'labour', label: 'Job charges (₹)', type: 'number', fmt: 'money', onInput: d => { d._labourTouched = true; },
     help: 'Added to the agency\'s account (pay it in Supplier Payments). At your own factory it is labour.' },
@@ -810,7 +795,7 @@ const SCHEMAS = {
   dyeing: {
     title: 'Receive Coloured Fabric (Step 2)', singular: 'Dyeing Entry', col: 'dyeing', printTitle: 'DYEING BATCH CARD',
     fixed: { chemLoc: 'STORE' },
-    note: 'Step 2 of dyeing — receive the coloured fabric the agency delivers (the grey went to it in Step 1, Send Grey for Dyeing), all at once or in parts (e.g. 200 kg now, 300 kg later). It takes the grey lot sent to that agency and keeps its lot number. Type the dyed output and the wastage (kg or %, 0 by default); the grey it used fills in, and the rest of the lot stays at the agency as pending. Tick "Last delivery" on the final part. Add dyes & chemicals only if you actually supply them from the Main Store (the agency usually uses its own). The job charges go to the agency\'s account, and the coloured fabric then goes to finishing.',
+    note: 'Step 2 of dyeing — receive the coloured fabric the agency delivers (the grey went to it in Step 1, Send Grey for Dyeing), all at once or in parts (e.g. 200 kg now, 300 kg later). It takes the grey lot sent to that agency and keeps its lot number. Type the dyed output; the grey it used fills in, and the rest of the lot stays at the agency as pending. Tick "Last delivery" on the final part. Add dyes & chemicals only if you actually supply them from the Main Store (the agency usually uses its own). The job charges go to the agency\'s account, and the coloured fabric then goes to finishing.',
     onNew: async doc => { const p = Cache.list('processes').find(x => x.stage === 'Dyeing'); if (p) { doc.process = p.id; doc.labourRate = S.num(p.labourRate); } },
     recalc: productionRecalc('Dyeing'),
     layout: [
@@ -829,7 +814,7 @@ const SCHEMAS = {
       ] },
       { grid: { k: 'lines', title: 'Dyes & chemicals you supply (from Main Store; leave empty — the agency usually uses its own)', cols: [C.item(['Dyes & Chemicals']), C.lotFrom(d => d.chemLoc || 'STORE', 'Batch'), C.qty('Qty'), C.unit] } },
       { title: 'Colored fabric output, wastage & job charges', fields: outputFields('Dyeing', ['Colored Fabric'], [
-        { k: 'lastDelivery', label: 'Last delivery of this grey lot: whatever grey of the lot is still at the agency is used up, and the rest counts as wastage', type: 'check', w: 4,
+        { k: 'lastDelivery', label: 'Last delivery of this grey lot: whatever grey of the lot is still at the agency is used up', type: 'check', w: 4,
           onChange: d => { d._dyeTouch = true; d._inTouched = false; d._wpTyped = false; d._wastageQtyTouched = false; } },
         { k: '_greyLeft', label: 'Grey of this lot still at the agency after this (kg)', type: 'calc', fmt: 'qty',
           value: (d, _, ctx) => d.location && d.inItem && ctx && ctx.available ? S.r3(Math.max(0, S.num(ctx.available(d.location, d.inItem, d.lotNo)) - S.num(d.inQty))) : '',
@@ -839,7 +824,7 @@ const SCHEMAS = {
           help: 'The finishing agency it goes to, or this same agency when it also finishes' }]) },
       { fields: [F.remarks] },
     ],
-    listCols: ['no', 'date', 'lotNo', 'location', 'color', { k: 'inQty', label: 'Grey kg', fmt: 'qty' }, { k: 'outQty', label: 'Dyed kg', fmt: 'qty' }, { k: 'wastageQty', label: 'Wastage kg', fmt: 'qty' }, { k: '_wp', label: 'Wastage %', fmt: 'pct', value: d => wastagePct(d, 'Dyeing') }, { k: 'outLoc', label: 'Sent to' }],
+    listCols: ['no', 'date', 'lotNo', 'location', 'color', { k: 'inQty', label: 'Grey kg', fmt: 'qty' }, { k: 'outQty', label: 'Dyed kg', fmt: 'qty' }, { k: 'outLoc', label: 'Sent to' }],
   },
   finishing: {
     title: 'Finishing & Packing', singular: 'Finishing Entry', col: 'finishing', printTitle: 'FINISHING & PACKING SLIP',
@@ -867,7 +852,7 @@ const SCHEMAS = {
         { k: '_avgRoll', label: 'Average roll weight (kg)', type: 'calc', fmt: 'qty', value: d => S.num(d.rolls) ? S.num(d.outQty) / S.num(d.rolls) : '' }]) },
       { fields: [F.remarks] },
     ],
-    listCols: ['no', 'date', 'lotNo', 'location', { k: 'outItem', label: 'Item' }, { k: 'inQty', label: 'In kg', fmt: 'qty' }, { k: 'outQty', label: 'FG kg', fmt: 'qty' }, { k: 'rolls', label: 'Rolls', fmt: 'int' }, { k: 'wastageQty', label: 'Wastage kg', fmt: 'qty' }, { k: '_wp', label: 'Wastage %', fmt: 'pct', value: d => wastagePct(d, 'Finishing') }, { k: 'outLoc', label: 'Godown' }],
+    listCols: ['no', 'date', 'lotNo', 'location', { k: 'outItem', label: 'Item' }, { k: 'inQty', label: 'In kg', fmt: 'qty' }, { k: 'outQty', label: 'FG kg', fmt: 'qty' }, { k: 'rolls', label: 'Rolls', fmt: 'int' }, { k: 'outLoc', label: 'Godown' }],
   },
   lotBoms: {
     title: 'Lot BOM', singular: 'Lot BOM', col: 'lotBoms', printTitle: 'LOT BOM', stock: true,
@@ -1259,7 +1244,6 @@ const NAV = [
   { t: 'Purchase', icon: 'cart', kids: [['Purchase Orders', 'purchaseOrders'], ['Goods Receipt (GRN)', 'grn'], ['Purchase Bills', 'purchaseBills'], ['Supplier Payments', 'payments'], ['Pending POs', '#/report/poPending']] },
   { t: 'Inventory', icon: 'box', kids: [['Stock Summary', '#/report/stock'], ['Yarn Stock', '#/report/stockMovement?category=Yarn'], ['Godown Stock', '#/report/godownStock'], ['Stock Ledger', '#/report/stockLedger'], ['Yarn Issue to Knitting', 'yarnIssue'], ['Godown Transfer', 'godownTransfer'], ['All Transfers', 'transfers'], ['Opening / Adjustment', 'stockAdjust']] },
   { t: 'Production', icon: 'factory', kids: [['Lot BOM', 'lotBoms'], ['Knitting', 'knitting'], ['Knitting Deliveries', '#/report/knitDeliveries'], ['1 · Send Grey for Dyeing', 'greyTransfer'], ['2 · Receive Coloured Fabric', 'dyeing'], ['Finishing & Packing', 'finishing'], ['Processing Status', '#/report/processStatus'], ['Status Updates', 'jobStatus'], ['Job Work Register', '#/report/jobWork'], ['Agency Summary', '#/report/agencies'], ['Production Report', '#/report/production'], ['Batch / Lot Tracking', '#/report/lots'], ['Lot BOM vs Actual', '#/report/bomVsActual']] },
-  { t: 'Wastage', icon: 'trash', kids: [['Wastage Report', '#/report/wastage']] },
   { t: 'Costing', icon: 'calc', kids: [['Lot Costing Sheet', '#/report/costing'], ['Item-wise Costing', '#/report/itemCosting'], ['Overhead Absorption', '#/report/overheads']] },
   { t: 'Sales', icon: 'tag', kids: [['Quotations', 'quotations'], ['Sales Orders', 'salesOrders'], ['Delivery Challans', 'deliveries'], ['Invoices', 'invoices'], ['Sale Bills & Dispatch', '#/report/dispatchLog'], ['Party Price List', 'priceList'], ['Pending Orders', '#/report/soPending']] },
   { t: 'Finance & Accounts', icon: 'rupee', kids: [['Customer Receipts', 'receipts'], ['Supplier Payments', 'payments'], ['Bank & Cash Book', '#/report/bankBook'], ['Bank Entries', 'bankEntries'], ['Bank Reconciliation', '#/report/bankReco'], ['Cheques Not Cashed', '#/report/cheques'], ['Salesman Collections', '#/report/collections'], ['Bank & Cash Accounts', 'banks'],
@@ -1288,7 +1272,6 @@ const REPORTS = {
   lots: { title: 'Batch / Lot Tracking', group: 'Production', filters: ['lot'] },
   bomVsActual: { title: 'Lot BOM vs Actual', group: 'Production', filters: ['lot', 'stage'] },
   knitDeliveries: { title: 'Knitting Deliveries', group: 'Production', filters: ['agency', 'lot', 'all'] },
-  wastage: { title: 'Wastage Report', group: 'Production', filters: ['from', 'to', 'stage'] },
   costing: { title: 'Lot Costing Sheet', group: 'Costing', filters: ['from', 'to', 'fgItem'] },
   itemCosting: { title: 'Item-wise Costing', group: 'Costing', filters: ['from', 'to'] },
   overheads: { title: 'Overhead Absorption', group: 'Costing', filters: ['from', 'to'] },

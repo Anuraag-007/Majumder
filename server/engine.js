@@ -1134,7 +1134,7 @@ function buildReports(ctx) {
       })).sort((a, b) => a.date.localeCompare(b.date));
       return {
         title: 'Production Report',
-        columns: [C('date', 'Date', 'date'), C('stage', 'Stage'), C('doc', 'Entry No'), C('lot', 'Lot'), C('agency', 'Agency / Unit'), C('inItem', 'Input'), C('outItem', 'Output'), C('sentTo', 'Sent To'), C('inQty', 'Input Kg', 'qty', true), C('outQty', 'Output Kg', 'qty', true), C('rolls', 'Rolls', 'int', true), C('wastageQty', 'Wastage Kg', 'qty', true), C('wastPct', 'Wastage %', 'pct'), C('processLoss', 'Process Loss Kg', 'qty', true), C('labour', 'Job / Labour Charges', 'money', true), C('outValue', 'Output Value', 'money', true), C('rate', 'Cost/Kg', 'money')],
+        columns: [C('date', 'Date', 'date'), C('stage', 'Stage'), C('doc', 'Entry No'), C('lot', 'Lot'), C('agency', 'Agency / Unit'), C('inItem', 'Input'), C('outItem', 'Output'), C('sentTo', 'Sent To'), C('inQty', 'Input Kg', 'qty', true), C('outQty', 'Output Kg', 'qty', true), C('rolls', 'Rolls', 'int', true), C('processLoss', 'Process Loss Kg', 'qty', true), C('labour', 'Job / Labour Charges', 'money', true), C('outValue', 'Output Value', 'money', true), C('rate', 'Cost/Kg', 'money')],
         rows,
       };
     },
@@ -1188,7 +1188,7 @@ function buildReports(ctx) {
         columns: [C('date', 'Finished', 'date'), C('lot', 'Lot'), C('item', 'Item'), C('color', 'Color'), C('qty', 'FG Kg', 'qty', true), C('rolls', 'Rolls', 'int', true),
           C('yarn', 'Yarn', 'money', true), C('dyes', 'Dyes & Chem', 'money', true), C('packing', 'Packing', 'money', true),
           C('knitLabour', 'Knitting Charges', 'money', true), C('dyeLabour', 'Dyeing Charges', 'money', true), C('finLabour', 'Finishing Charges', 'money', true),
-          C('overhead', 'Overhead', 'money', true), C('wastage', 'Wastage', 'money', true), C('total', 'Total Cost', 'money', true),
+          C('overhead', 'Overhead', 'money', true), C('total', 'Total Cost', 'money', true),
           C('perKg', 'Cost / Kg', 'money'), C('perRoll', 'Cost / Roll', 'money'), C('perMeter', 'Cost / Mtr', 'money')],
         rows,
       };
@@ -1211,7 +1211,7 @@ function buildReports(ctx) {
       });
       return {
         title: 'Item-wise Costing',
-        columns: [C('item', 'Item'), C('lots', 'Lots', 'int', true), C('qty', 'FG Kg', 'qty', true), C('rolls', 'Rolls', 'int', true), C('rmKg', 'Material / Kg', 'money'), C('labourKg', 'Job Charges / Kg', 'money'), C('ohKg', 'Overhead / Kg', 'money'), C('wastKg', 'Wastage / Kg', 'money'), C('totalKg', 'Cost / Kg', 'money'), C('total', 'Total Cost', 'money', true)],
+        columns: [C('item', 'Item'), C('lots', 'Lots', 'int', true), C('qty', 'FG Kg', 'qty', true), C('rolls', 'Rolls', 'int', true), C('rmKg', 'Material / Kg', 'money'), C('labourKg', 'Job Charges / Kg', 'money'), C('ohKg', 'Overhead / Kg', 'money'), C('totalKg', 'Cost / Kg', 'money'), C('total', 'Total Cost', 'money', true)],
         rows,
       };
     },

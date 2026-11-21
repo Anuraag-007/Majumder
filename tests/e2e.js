@@ -457,8 +457,8 @@ async function run() {
     await fill('Output qty (kg)', 200);
     const part = [await get('Grey fabric used (kg)'), await get('Grey of this lot still at the agency after this (kg)')];
     if (part.join('|') !== '200|385') throw new Error('part delivery should leave grey pending, not wastage: grey used / still at agency = ' + part.join(' / '));
-    // the real delivery: 570 kg red with 15 kg wastage -> 585 kg grey used, nothing left of the lot
-    await fill('Output qty (kg)', 570); await fill('Wastage qty (kg)', 15);
+    // the real delivery: 570 kg red; "Last delivery" uses up all 585 kg grey of the lot, no wastage
+    await fill('Output qty (kg)', 570); await tick('Last delivery');
     await grid(0, 0, 'Item', 'DRED'); await grid(0, 0, 'Qty', 11.7);
     await addLine(0); await grid(0, 1, 'Item', 'SODA'); await grid(0, 1, 'Qty', 58.5);
     const q = await get('Grey fabric used (kg)'), l = await get('Job charges (₹)');
@@ -496,8 +496,8 @@ async function run() {
     const q = await get('Output qty (kg)'), n = await get('Rolls');
     if (q !== '560' || n !== '24') throw new Error('roll weights gave ' + q + ' kg, ' + n + ' rolls');
     await fill('Meters', 2200);
-    const w = await get('Wastage qty (kg)'), l = await get('Job charges (₹)');
-    if (w !== '10' || l !== '3360') throw new Error('wastage ' + w + ', charges ' + l);
+    const l = await get('Job charges (₹)');
+    if (l !== '3360') throw new Error('charges ' + l);
     return save();
   });
   await step('Lot BOM vs Actual: dye and soda as per BOM; 24 poly bags against 22.8 is over the BOM; a line opens the BOM', async () => {
@@ -636,9 +636,8 @@ async function run() {
   await step('cost per kg = ₹333.77, per roll = ₹7,787.92, per meter = ₹84.96', () => near(row.perKg, 333.77) && near(row.perRoll, 7787.92) && near(row.perMeter, 84.96));
   // Knitting/dyeing charges spent on fabric later lost as waste move into the wastage bucket; finishing charges, packing and overhead arrive whole.
   await step('finishing charges ₹3,360, packing ₹120 and overhead ₹11,200 reach the lot in full', () => near(row.finLabour, 3360) && near(row.packing, 120) && near(row.overhead, 11200));
-  await step('all job charges (₹17,400) are accounted for: in the lot or in its wastage cost', () => row.knitLabour + row.dyeLabour + row.finLabour < 17400 && row.knitLabour + row.dyeLabour + row.finLabour > 17400 * 0.95);
+  await step('all job charges (₹17,400) end up in the lot (no wastage to lose them to)', () => near(row.knitLabour + row.dyeLabour + row.finLabour, 17400));
   await step('wastage cost is part of the total, not added twice', () => near(row.yarn + row.dyes + row.packing + row.knitLabour + row.dyeLabour + row.finLabour + row.overhead + row.wastage, TOTAL));
-  await step('wastage report: 15 + 10 kg across dyeing and finishing (knitting has no wastage)', async () => { const w = await api('/api/report/wastage'); const s = w.tables[0].rows; return s.reduce((a, r) => a + r.qty, 0) === 25; });
   await step('lot tracking: L-0001 from the GRN (Shree Mills, 1000 kg) — yarn 600 → FG 560 (yield 93.33%), 400 kg sold, 160 kg in stock', async () => {
     const l = (await api('/api/report/lots')).rows.find(r => r.lot === 'L-0001');
     return l && /Shree Mills/.test(l.supplier) && l.recdQty === 1000 && l.yarnIn === 600 && l.fgOut === 560 && l.yieldPct === 93.33 && l.sold === 400 && l.inStock === 160 ? l.status : false;
