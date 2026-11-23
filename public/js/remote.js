@@ -69,8 +69,8 @@ const RemoteSupport = (() => {
     let lastField = null;
     const audioEls = [];
 
-    try { display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false }); }
-    catch (e) { toast('Screen sharing was not allowed. Click "Start sharing" and pick "This tab".', 'err'); return false; }
+    try { display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false, preferCurrentTab: true }); }
+    catch (e) { toast('Sharing was not allowed. Click "Start sharing" and allow sharing this ERP tab.', 'err'); return false; }
 
     const bar = buildBar();
     document.body.appendChild(bar.el);
@@ -79,7 +79,7 @@ const RemoteSupport = (() => {
     document.body.appendChild(cursor);
 
     const surf = (display.getVideoTracks()[0].getSettings() || {}).displaySurface;
-    if (surf && surf !== 'browser') bar.warn('You shared a whole window or screen — the view works, but to let a colleague click in the right place, Stop and share "This tab".');
+    if (surf && surf !== 'browser') { toast('For your privacy only this ERP website can be shared, not your whole screen or other apps. Click "Start sharing" again and share just this tab.', 'err'); cleanup(); return false; }
     display.getVideoTracks()[0].addEventListener('ended', cleanup); // the browser's own "Stop sharing"
 
     function cleanup() {
@@ -133,7 +133,7 @@ const RemoteSupport = (() => {
 
   // The top bar shown to the user for the whole session.
   function buildBar() {
-    const msg = h('span', { class: 'rs-bar-msg' }, 'Preparing to share your screen…');
+    const msg = h('span', { class: 'rs-bar-msg' }, 'Preparing to share this ERP tab…');
     const code = h('b', { class: 'rs-bar-code' });
     const allowBox = h('input', { type: 'checkbox' });
     const allow = h('label', { class: 'rs-bar-allow' }, allowBox, ' Allow support to control my screen');
@@ -146,7 +146,7 @@ const RemoteSupport = (() => {
     allowBox.onchange = () => api.onAllow && api.onAllow(allowBox.checked);
     micBtn.onclick = async () => { const on = api.onMic && await api.onMic(); micBtn.textContent = on ? 'Mic on' : 'Mic off'; micBtn.classList.toggle('on', !!on); };
     api.setCode = c => { msg.textContent = 'You are sharing your ERP screen. Read this code to support:'; code.textContent = c; };
-    api.setAgent = name => { if (name) { msg.textContent = name + ' is viewing your screen.'; code.textContent = ''; } else { msg.textContent = 'Support left. Stop when you are done, or wait for them to re-join.'; } };
+    api.setAgent = name => { if (name) { msg.textContent = name + ' is viewing this ERP tab.'; code.textContent = ''; } else { msg.textContent = 'Support left. Stop when you are done, or wait for them to re-join.'; } };
     api.setAllow = on => { allowBox.checked = on; };
     api.warn = t => { warnEl.hidden = false; warnEl.textContent = t; };
     return api;
@@ -209,10 +209,10 @@ const RemoteSupport = (() => {
 
   function hostCard() {
     const card = h('section', { class: 'card rs-card' });
-    const status = h('p', { class: 'muted' }, 'Share your ERP tab so a support colleague can see it and, if you allow, help on it. You stay in control: a bar at the top lets you stop, or switch control off, at any time.');
+    const status = h('p', { class: 'muted' }, 'Share only this ERP tab so a support colleague can see it and, if you allow, help on it. They cannot see your desktop or any other app or tab — only this website. You stay in control: a bar at the top lets you stop, or switch control off, at any time.');
     const startBtn = h('button', { class: 'btn primary' }, icon('screen', 16), 'Start sharing');
     const onState = s => {
-      if (s === 'started') { startBtn.hidden = true; status.textContent = 'Starting… choose "This tab" in the browser\'s share box.'; }
+      if (s === 'started') { startBtn.hidden = true; status.textContent = 'Starting… allow sharing this tab in the browser box (only this ERP tab is offered).'; }
       if (s === 'ready') status.textContent = 'Sharing is active — use the bar across the top of the screen. Read the code there to your colleague.';
       if (s === 'stopped') { startBtn.hidden = false; status.textContent = 'Sharing stopped. Click "Start sharing" to begin again.'; }
     };
