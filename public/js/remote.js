@@ -232,15 +232,18 @@ const RemoteSupport = (() => {
     const ctlBadge = h('span', { class: 'badge warn' }, 'Control not allowed yet');
     const typeBox = h('input', { type: 'text', class: 'rs-type', placeholder: 'Click a box on the screen, then type here', hidden: true, 'aria-label': 'Type into the focused box' });
     const stopBtn = h('button', { class: 'btn small danger' }, 'Disconnect');
-    stage.append(h('div', { class: 'rs-stagehead' }, ctlBadge, typeBox, stopBtn), h('div', { class: 'rs-videowrap' }, video));
+    const fsBtn = h('button', { class: 'btn small' }, 'Fullscreen');
+    stage.append(h('div', { class: 'rs-stagehead' }, ctlBadge, typeBox, fsBtn, stopBtn), h('div', { class: 'rs-videowrap' }, video));
+    fsBtn.onclick = () => { try { if (document.fullscreenElement) document.exitFullscreen(); else (stage.requestFullscreen || stage.webkitRequestFullscreen).call(stage); } catch (e) { toast('Fullscreen was not allowed by the browser.', 'err'); } };
+    document.addEventListener('fullscreenchange', () => { fsBtn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen'; });
 
     const ui = {
       video, panel: card,
-      setHost: name => { status.textContent = (name || 'The user') + '\'s screen — connecting the picture…'; stage.hidden = false; codeInp.disabled = joinBtn.disabled = true; },
+      setHost: name => { status.textContent = (name || 'The user') + '\'s ERP — connecting the picture…'; stage.hidden = false; codeInp.disabled = joinBtn.disabled = true; const g = card.closest('.rs-grid'); if (g) g.classList.add('rs-live'); },
       setControl: on => { ctlBadge.textContent = on ? 'Control active — click, scroll and type on the screen' : 'Control not allowed yet (ask the user to tick "Allow support to control my screen")'; ctlBadge.className = 'badge ' + (on ? 'ok' : 'warn'); typeBox.hidden = !on; if (!on) typeBox.value = ''; },
       setFocus: (on, value) => { if (!on) { typeBox.value = ''; return; } typeBox.value = value || ''; typeBox.focus(); typeBox.select(); },
       note: msg => toast(msg),
-      onStopped: () => { session = null; stage.hidden = true; codeInp.disabled = joinBtn.disabled = false; status.textContent = 'Enter the code the user reads out to you, then help them on their screen.'; },
+      onStopped: () => { session = null; stage.hidden = true; codeInp.disabled = joinBtn.disabled = false; status.textContent = 'Enter the code the user reads out to you, then help them on their screen.'; const g = card.closest('.rs-grid'); if (g) g.classList.remove('rs-live'); },
     };
 
     joinBtn.onclick = async () => {

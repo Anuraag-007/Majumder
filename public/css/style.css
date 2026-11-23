@@ -719,7 +719,13 @@ table.report td.tone-warn { color: var(--warn); font-weight: 600; }
 .rs-stagehead { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
 .rs-type { flex: 1 1 220px; min-width: 150px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: inherit; font: inherit; }
 .rs-videowrap { background: #000; border-radius: 10px; overflow: hidden; border: 1px solid var(--border); }
-.rs-video { display: block; width: 100%; height: auto; cursor: crosshair; background: #000; }
+.rs-video { display: block; width: 100%; height: auto; max-height: 78vh; object-fit: contain; cursor: crosshair; background: #000; }
+/* AnyDesk-style big view: when a session is live, the agent's screen takes the whole row */
+.rs-grid.rs-live { grid-template-columns: 1fr; }
+.rs-grid.rs-live > .rs-card:first-child { display: none; }
+.rs-stage:fullscreen { background: var(--surface-2); padding: 10px; box-sizing: border-box; height: 100vh; display: flex; flex-direction: column; }
+.rs-stage:fullscreen .rs-videowrap { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 0; }
+.rs-stage:fullscreen .rs-video { width: auto; height: auto; max-width: 100%; max-height: 100%; }
 /* the pointer the agent moves, shown on the user's screen */
 .rs-cursor { position: fixed; z-index: 2147482000; left: -100px; top: 0; width: 18px; height: 18px; margin: -2px 0 0 -2px; border-radius: 50%; background: rgba(79,107,220,.35); border: 2px solid #4f6bdc; pointer-events: none; transition: left .05s linear, top .05s linear; }
 .rs-cursor.act { background: rgba(224,70,70,.4); border-color: #e04646; }
