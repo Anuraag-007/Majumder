@@ -69,7 +69,7 @@ const RemoteSupport = (() => {
     let lastField = null;
     const audioEls = [];
 
-    try { display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: false, preferCurrentTab: true }); }
+    try { display = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 30 }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false, preferCurrentTab: true }); }
     catch (e) { toast('Sharing was not allowed. Click "Start sharing" and allow sharing this ERP tab.', 'err'); return false; }
 
     const bar = buildBar();
@@ -113,8 +113,12 @@ const RemoteSupport = (() => {
       pc = new RTCPeerConnection({ iceServers: iceServers() });
       pc.onicecandidate = e => { if (e.candidate) ws.send_({ t: 'ice', candidate: e.candidate }); };
       pc.ontrack = e => { const a = h('audio', { autoplay: true }); a.srcObject = e.streams[0]; document.body.appendChild(a); audioEls.push(a); };
+      const vtrack = display.getVideoTracks()[0];
+      if (vtrack) { try { vtrack.contentHint = 'text'; } catch (e) { /* older browsers */ } }
       display.getTracks().forEach(t => pc.addTrack(t, display));
       if (mic) mic.getTracks().forEach(t => pc.addTrack(t, mic));
+      // sharper, snappier screen: tell the encoder it is text and give it plenty of bitrate
+      try { const vs = pc.getSenders().find(s => s.track && s.track.kind === 'video'); if (vs) { const prm = vs.getParameters(); prm.encodings = (prm.encodings && prm.encodings.length) ? prm.encodings : [{}]; prm.encodings[0].maxBitrate = 6000000; prm.encodings[0].maxFramerate = 30; await vs.setParameters(prm); } } catch (e) { /* unsupported: keep defaults */ }
       const offer = await pc.createOffer(); await pc.setLocalDescription(offer); ws.send_({ t: 'sdp', sdp: pc.localDescription });
     }
 
@@ -190,7 +194,7 @@ const RemoteSupport = (() => {
     video.addEventListener('mousemove', e => { const now = Date.now(); if (now - lastMove < 40) return; lastMove = now; ws.send_(Object.assign({ t: 'move' }, norm(e))); });
     video.addEventListener('click', e => sendCtl(Object.assign({ t: 'click' }, norm(e))));
     video.addEventListener('dblclick', e => sendCtl(Object.assign({ t: 'dblclick' }, norm(e))));
-    video.addEventListener('wheel', e => { e.preventDefault(); sendCtl({ t: 'scroll', dx: e.deltaX, dy: e.deltaY }); }, { passive: false });
+    video.addEventListener('wheel', e => { e.preventDefault(); sendCtl(Object.assign({ t: 'scroll', dx: e.deltaX, dy: e.deltaY }, norm(e))); }, { passive: false });
 
     return { typeText: v => sendCtl({ t: 'text', value: v }), sendKey: k => sendCtl({ t: 'key', key: k }), stop: cleanup };
   }
