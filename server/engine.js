@@ -2469,7 +2469,7 @@ function buildReports(ctx) {
           sales: r2(sales), purchases: r2(sum(data.purchaseBills.filter(d => inRange(d.date, range)), d => num(d.taxable))),
           profit: r2(sum(lines, l => l.sale) - cogs), margin: sum(lines, l => l.sale) ? r2((sum(lines, l => l.sale) - cogs) / sum(lines, l => l.sale) * 100) : 0,
           collections: r2(sum(countedDays(data.receipts).filter(x => inRange(x.date, range)), x => x.amount)),
-          knitKg: r3(sum(knit, d => num(d.outQty))), fgKg: r3(fgKg), avgCostKg: fgKg ? r2(fgCost / fgKg) : 0,
+          knitKg: r3(sum(knit, d => num(d.outQty))), fgKg: r3(fgKg), fgRolls: Math.round(sum(fin, d => num(d.rolls))), avgCostKg: fgKg ? r2(fgCost / fgKg) : 0,
           wastPct: yarnIn ? r2(waste / yarnIn * 100) : 0, invoices: inv.length,
         };
       };

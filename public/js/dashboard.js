@@ -127,7 +127,7 @@ const Dash = (() => {
       stat('Purchases', rupee0(k.purchases), delta(k.purchases, p.purchases, null), 'bills, ex-GST', flowSeries(t.purchases), '#/report/purchase?from=' + d.from + '&to=' + d.to),
       stat('Gross profit', rupee0(k.profit), delta(k.profit, p.profit, true), k.margin.toFixed(1) + '% margin', flowSeries(t.profit), '#/report/profitability?from=' + d.from + '&to=' + d.to),
       stat('Collections', rupee0(k.collections), delta(k.collections, p.collections, true), 'received', flowSeries(t.collections), '#/list/receipts'),
-      stat('Finished', kg(k.fgKg), delta(k.fgKg, p.fgKg, true), 'knitted ' + kg(k.knitKg), flowSeries(t.fgKg), '#/report/production?from=' + d.from + '&to=' + d.to),
+      stat('Finished', kg(k.fgKg), delta(k.fgKg, p.fgKg, true), U.int(k.fgRolls || 0) + ' rolls · knitted ' + kg(k.knitKg), flowSeries(t.fgKg), '#/report/production?from=' + d.from + '&to=' + d.to),
       stat('Cost per kg', k.avgCostKg ? '₹ ' + U.money(k.avgCostKg) : '—', delta(k.avgCostKg, p.avgCostKg, false), 'finished lots', lotsCost, '#/report/costing?from=' + d.from + '&to=' + d.to),
       stat('Wastage', k.wastPct.toFixed(2) + '%', delta(k.wastPct, p.wastPct, false, 'pts', p.knitKg > 0), 'of yarn knitted', null, '#/report/wastage?from=' + d.from + '&to=' + d.to));
 

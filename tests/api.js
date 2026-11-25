@@ -224,7 +224,7 @@ const ok = (c, msg) => { if (!c) fails++; console.log((c ? 'PASS ' : 'FAIL ') + 
   r = await call('POST', '/api/knitting', { date: d, location: KA, outLoc: KA, lines: [{ item: yarn.id, lot: L, qty: 20 }], outItem: grey.id, outQty: 19, wastageQty: 1, labour: 171 });
   ok(r.s === 201, 'knitting can keep the grey fabric at the knitting agency');
   r = await call('POST', '/api/dyeing', { date: d, location: DA, outLoc: DA, lotNo: L, inItem: grey.id, inQty: 19, lines: [], outItem: col.id, outQty: 18 });
-  ok(r.s === 400 && /It is at Knit Co \(19 kg\): send it to Dye Co with Send Grey for Dyeing/i.test(r.j.error), 'dyeing grey that is still at the knitter says where it is and how to send it: ' + r.j.error);
+  ok(r.s === 400 && /It is at Knit Co \(19 kg\): send its grey fabric to Dye Co on the knitting entry/i.test(r.j.error), 'dyeing grey that is still at the knitter says where it is and how to send it: ' + r.j.error);
   r = await call('POST', '/api/transfers', { date: d, purpose: 'Grey Transfer', fromLoc: KA, toLoc: DA, lines: [{ item: grey.id, lot: L, qty: 19 }] }); ok(r.s === 201, 'grey sent from the knitting agency to the dyeing agency');
   // job charges: owed to each agency, paid in Supplier Payments, not in Labour Payable
   r = await call('GET', '/api/report/partyLedger?party=' + dyeCo.id);

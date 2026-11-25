@@ -211,7 +211,7 @@
     }
     if (cat === 'Grey Fabric' && loc !== 'STORE' && loc !== 'FG') {
       return other.length
-        ? { text: 'It is at ' + where() + ': send it to ' + nm(loc) + ' with Send Grey for Dyeing.', screen: 'greyTransfer' }
+        ? { text: 'It is at ' + where() + ': send its grey fabric to ' + nm(loc) + ' on the knitting entry.', screen: 'knitting' }
         : { text: 'Knit a lot first, and send its grey fabric to ' + nm(loc) + ' on the knitting entry.', screen: 'knitting' };
     }
     if (cat === 'Colored Fabric' && loc !== 'STORE' && loc !== 'FG') {

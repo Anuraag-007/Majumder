@@ -413,7 +413,7 @@ async function run() {
     await fill('Grey fabric produced', 'GSJ'); await fill('Output qty (kg)', 585); await fill('Rolls', 25); await fill('GSM', 160);
     const l = await get('Job charges (₹)');
     if (l !== '5265') throw new Error('charges ' + l);
-    await fill('Grey fabric sent to', 'Bengal Dyeing House');
+    await fill('Sent to dyeing agency', 'Bengal Dyeing House');
     await shot('06-knitting');
     return save();
   });
@@ -450,7 +450,7 @@ async function run() {
   await step('Bengal Dyeing House delivered 570 kg red of lot L-0001; a part-delivery leaves the rest of the lot pending (not wastage); the dyes it used (11.7 + 58.5 kg) are typed by hand; grey used (585 kg) and job charges (₹8,775) fill in', async () => {
     await openNew('dyeing');
     await fill('Agency / unit', 'Bengal Dyeing House');
-    const to = await getText('Dyed fabric sent to');
+    const to = await getText('Sent to finishing & packing agency');
     await fill('Grey fabric', 'GSJ'); await fill('Lot no', 'L-0001');
     await fill('Color', 'Red'); await fill('Colored fabric produced', 'CSJ');
     // a part-delivery: only the dyed output's worth of grey is used; the rest of the lot stays pending, not wastage
@@ -943,7 +943,7 @@ async function run() {
       await fill('Grey fabric produced', 'GSJ'); await fill('Output qty (kg)', grey);
       if (last) { await tick('Last delivery'); await sleep(200); }
       const r = { lot, info, yarn: await grid(0, 0, 'Qty') };
-      await fill('Grey fabric sent to', 'Maa Tara Knitting');
+      await fill('Sent to dyeing agency', 'Maa Tara Knitting');
       await save();
       return r;
     };
